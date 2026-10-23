@@ -3,3 +3,4 @@ yolo/
 results/
 *.pt
 *.cache
+.venv/

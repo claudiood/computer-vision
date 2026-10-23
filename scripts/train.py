@@ -1,56 +1,60 @@
-import numpy as np
+import gc
+
+import optuna
+import torch
 from ultralytics import YOLO
 
-DATASET_PATH = "dataset/class_2" 
+DATASET_PATH = './dataset/class' #selecionem o dataset que querem treinar aqui
 
-MODEL_NAME = "yolo26m-cls.pt"  
-EPOCHS = 30  
-IMGSZ = 1080  
-BATCH = 8  
-PROJECT_DIR = "/home/andressa/Documents/UFPEL/Semestre 7/visao/computer-vision/results"
-EXP_NAME = "treino5_1080-yolom"
+MODEL_NAME = "yolo26m-cls.pt" #mudem o modelo aqui
 
-print("--> Iniciando o treinamento...")
-modelo = YOLO(MODEL_NAME)
+EXP_NAME = "optuna_yolom" #aqui é o nome do experimento, mudem pra saber qual treino é qual
 
-modelo.train(
+def objective(trial):
+    lr0 = trial.suggest_float("lr0", 1e-5, 1e-2, log=True)
+    imgsz = trial.suggest_categorical("imgsz", [640, 896, 1080])
+
+    model = YOLO(MODEL_NAME)
+    metrics = model.train(
+        data=DATASET_PATH,
+        epochs=100,
+        imgsz=imgsz,
+        batch=4,
+        optimizer="Adam",
+        lr0=lr0,
+        patience=10,
+        project=f"./results/{EXP_NAME}",
+        name="search",
+        exist_ok=True,
+    )
+
+    del model
+    gc.collect()
+    torch.cuda.empty_cache()
+
+    return metrics.top1
+
+
+study = optuna.create_study(direction="maximize")
+study.optimize(objective, n_trials=50)
+
+best_params = study.best_trial.params
+print(f"\nBest hyperparameters: {best_params}")
+
+best_model = YOLO(MODEL_NAME)
+
+best_model.train(
     data=DATASET_PATH,
-    epochs=EPOCHS,
-    imgsz=IMGSZ,
-    batch=BATCH,
-    patience=10, 
-    project=PROJECT_DIR,  
-    name=EXP_NAME,  
-    exist_ok=True, 
+    epochs=100,
+    imgsz=best_params["imgsz"],
+    batch=4,
+    optimizer="Adam",
+    lr0=best_params["lr0"],
+    patience=10,
+    project=f"./results/{EXP_NAME}",
+    name="final",
+    exist_ok=True,
 )
+metrics = best_model.val(data=DATASET_PATH, imgsz=best_params["imgsz"], split="test", project='./results')
 
-print("\n" + "=" * 50)
-print("--> Avaliando o melhor modelo carregado (best.pt)...")
-caminho_best_weights = f"{PROJECT_DIR}/{EXP_NAME}/weights/best.pt" 
-melhor_modelo = YOLO(caminho_best_weights)
-
-metricas = melhor_modelo.val(data=DATASET_PATH, imgsz=IMGSZ, project=PROJECT_DIR)
-
-print("\n" + "=" * 50)
-print("RESUMO DAS MÉTRICAS GERAIS:")
-print(f"Top-1 Accuracy : {metricas.top1:.2%}") 
-print(f"Top-5 Accuracy : {metricas.top5:.2%}")  
-print("=" * 50)
-
-m = metricas.confusion_matrix.matrix  
-acertos = np.diag(m)  
-
-precisao = acertos / np.maximum(m.sum(axis=1), 1)  
-recall = acertos / np.maximum(m.sum(axis=0), 1)  
-f1 = 2 * precisao * recall / np.maximum(precisao + recall, 1e-9)  
-
-print(f"{'Classe':<20} | {'Precisão':<10} | {'Recall':<10} | {'F1-Score':<10} | {'Imagens':<8}")
-print("-" * 68)
-
-for i, nome in melhor_modelo.names.items():  
-    qtd_imagens = int(m[:, i].sum())  
-    print(
-        f"{nome:<20} | {precisao[i]:<10.2f} | {recall[i]:<10.2f} | {f1[i]:<10.2f} | {qtd_imagens:<8}"
-    ) 
-
-print("=" * 50)
+print(f"\nTest accuracy: {metrics.top1:.2%}")
