@@ -4,7 +4,7 @@ import optuna
 import torch
 from ultralytics import YOLO
 
-DATASET_PATH = './dataset/class' #selecionem o dataset que querem treinar aqui
+DATASET_PATH = './dataset/dataset_andressa' #selecionem o dataset que querem treinar aqui
 
 MODEL_NAME = "yolo26m-cls.pt" #mudem o modelo aqui
 
@@ -17,13 +17,13 @@ def objective(trial):
     model = YOLO(MODEL_NAME)
     metrics = model.train(
         data=DATASET_PATH,
-        epochs=100,
+        epochs=50,
         imgsz=imgsz,
-        batch=4,
+        batch=8,
         optimizer="Adam",
         lr0=lr0,
         patience=10,
-        project=f"./results/{EXP_NAME}",
+        project=f"/home/andressa/Documents/UFPEL/Semestre 7/visao/computer-vision/results/{EXP_NAME}",
         name="search",
         exist_ok=True,
     )
@@ -36,7 +36,7 @@ def objective(trial):
 
 
 study = optuna.create_study(direction="maximize")
-study.optimize(objective, n_trials=50)
+study.optimize(objective, n_trials=20)
 
 best_params = study.best_trial.params
 print(f"\nBest hyperparameters: {best_params}")
@@ -45,16 +45,16 @@ best_model = YOLO(MODEL_NAME)
 
 best_model.train(
     data=DATASET_PATH,
-    epochs=100,
+    epochs=50,
     imgsz=best_params["imgsz"],
-    batch=4,
+    batch=8,
     optimizer="Adam",
     lr0=best_params["lr0"],
     patience=10,
-    project=f"./results/{EXP_NAME}",
+    project=f"/home/andressa/Documents/UFPEL/Semestre 7/visao/computer-vision/results/{EXP_NAME}",
     name="final",
     exist_ok=True,
 )
-metrics = best_model.val(data=DATASET_PATH, imgsz=best_params["imgsz"], split="test", project='./results')
+metrics = best_model.val(data=DATASET_PATH, imgsz=best_params["imgsz"], split="test", project='/home/andressa/Documents/UFPEL/Semestre 7/visao/computer-vision/results/{EXP_NAME}')
 
 print(f"\nTest accuracy: {metrics.top1:.2%}")
