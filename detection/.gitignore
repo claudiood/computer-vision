@@ -1,0 +1,7 @@
+# gerados (grandes ou por máquina): não versionar
+data/
+results/
+*.pt
+*.onnx
+__pycache__/
+# splits/ É versionado: o manifesto garante a mesma divisão para todo o grupo

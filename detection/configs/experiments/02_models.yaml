@@ -1,0 +1,20 @@
+# E2 — Versões e tamanhos da YOLO (mesma imgsz, mesmos padrões).
+# n e s das três gerações pedidas. m/l/x ficam de fora no começo: com ~100
+# imagens de treino, modelos grandes tendem a decorar o treino e custam muito
+# mais tempo; só valem a pena se 's' ganhar com folga de 'n' (tendência de
+# que capacidade ajuda). Nesse caso, rode: --variants yolo11m yolo26m
+extends: ../base_train.yaml
+name: 02_models
+description: YOLOv8 / YOLO11 / YOLO26, tamanhos n e s (m opcional), imgsz 640
+seeds: [0]
+reference: yolo26n          # comparação contra o modelo da linha de base
+variants:
+  yolov8n: {model: yolov8n.pt}
+  yolov8s: {model: yolov8s.pt}
+  yolo11n: {model: yolo11n.pt}
+  yolo11s: {model: yolo11s.pt}
+  yolo26n: {model: yolo26n.pt}
+  yolo26s: {model: yolo26s.pt}
+  # opcionais (só se 's' superar 'n' além do ruído):
+  yolo11m: {model: yolo11m.pt, train: {batch: 8}}
+  yolo26m: {model: yolo26m.pt, train: {batch: 8}}

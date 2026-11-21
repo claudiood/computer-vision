@@ -1,0 +1,45 @@
+# Configuração do dataset de detecção de danos em pavimentos.
+# Caminhos relativos são resolvidos a partir da pasta detection/.
+
+source:
+  images: ../dataset/detection/images          # pasta plana com todas as imagens
+  labels: ../dataset/detection/labels          # .txt YOLO exportados do Make Sense
+  class_names_file: ../dataset/detection/labels/labels.txt  # ordem oficial das classes
+  annotator_dirs: ../imagens/detection         # subpastas = anotadores (auditoria/estratificação)
+
+# A ORDEM define o número da classe nos .txt (0, 1, 2). Conferida contra o labels.txt.
+classes: [rachadura, remendo, buraco]
+classes_en: [crack, patch, pothole]
+
+# Imagem -> rótulo, quando os nomes não batem (achado na auditoria).
+label_aliases:
+  C35BCB13-3E29-4163-8A9D-FD28C694A963_1_201_a.heic: C35BCB13-3E29-4163-8A9D-FD28C694A963.txt
+
+# Imagens sem .txt: "exclude" (padrão: não sabemos se são fundo de verdade ou
+# se só não foram anotadas) ou "background" (entram como exemplos negativos).
+unlabeled_policy: exclude
+# Imagens confirmadas pelo grupo como fundo verdadeiro (sem dano), mesmo com policy=exclude.
+background_images: []
+# Imagens a excluir do dataset (ex.: decisão do grupo após a auditoria).
+exclude: []
+
+clean:
+  min_wh: 0.001        # caixas com largura/altura normalizada menor que isso são removidas
+
+prepare:
+  name: pavement_v1    # nome da versão do dataset preparado (data/<name>/)
+  max_side: 2048       # reduz fotos de 12 MP: suficiente para imgsz até 1280, cache/IO bem menores
+  jpeg_quality: 95
+  test_fraction: 0.15  # teste fixo, usado UMA vez no fim
+  folds: 5             # folds sobre o restante; o fold 0 é a validação padrão (~17% do total)
+  seed: 42
+  restarts: 300        # reinícios da busca de divisão estratificada
+  # Agrupamento de fotos da MESMA CENA (ficam sempre na mesma partição).
+  # A auditoria mostrou que as fotos foram tiradas em saídas de grupo com o mesmo
+  # celular e depois divididas entre os anotadores: o mesmo buraco aparece em
+  # fotos de pessoas diferentes, com segundos de diferença. Por isso o
+  # agrupamento usa data/hora do EXIF e numeração da câmera, não o anotador.
+  grouping:
+    hash_threshold: 70   # dHash 256 bits: <= 70 bits = cópia/reexportação (vizinho mais próximo real: >= 87)
+    time_window_s: 30    # mesma câmera e < 30 s entre as fotos = mesma cena
+    seq_window: 2        # fotos sem data: IMG_4701 e IMG_4703 (até 2 números) = mesma sequência

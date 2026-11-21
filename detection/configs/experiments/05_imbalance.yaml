@@ -1,0 +1,21 @@
+# E5 — Desbalanceamento de classes.
+# Auditoria: rachadura 57% das instâncias, buraco 31%, remendo 12% (em ~35% das
+# imagens). Estratégias que agem SÓ no treino (a validação continua original):
+#  - Repeat Factor Sampling (LVIS): repete imagens que contêm classes raras;
+#  - fator fixo para imagens com remendo;
+#  - peso maior para a perda de classificação (cls), que ajuda o modelo a
+#    separar classes parecidas (remendo × buraco) — não é por classe.
+# Critério: AP/F1 de 'remendo' sobe sem derrubar a média além do ruído.
+extends: ../base_train.yaml
+name: 05_imbalance
+description: oversampling (RFS / fixo) e peso da perda de classe
+inherit_best: 04_augmentation
+seeds: [0]
+variants:
+  control: {}
+  # remendo está em ~35% das imagens: com threshold <= 0.35 o RFS não repete nada
+  rfs_t05: {oversample: {method: rfs, threshold: 0.5}}   # repete ~1.2x as imagens com remendo
+  rfs_t10: {oversample: {method: rfs, threshold: 1.0}}   # ~1.7x
+  patch_x2: {oversample: {method: fixed, factors: {1: 2}}}
+  patch_x3: {oversample: {method: fixed, factors: {1: 3}}}
+  cls_gain_1: {train: {cls: 1.0}}

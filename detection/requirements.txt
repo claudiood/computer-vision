@@ -1,0 +1,12 @@
+# Pipeline de detecção de danos em pavimentos (pasta detection/)
+# Instale dentro de um ambiente virtual (manual, seção 1):  pip install -r requirements.txt
+ultralytics>=8.4.0      # YOLO26 exige 8.4+; YOLOv8 e YOLO11 também rodam nela
+optuna>=4.0
+pillow-heif>=0.18       # lê as fotos .HEIC do iPhone no preparo do dataset
+opencv-python>=4.8      # CLAHE (já vem com a ultralytics)
+pandas>=2.0
+matplotlib>=3.7
+pyyaml>=6.0
+psutil>=5.9
+# NÃO instale albumentations sem combinar com o grupo: com ele instalado a Ultralytics
+# passa a aplicar blur/CLAHE/cinza aleatórios no treino, o que muda os experimentos.

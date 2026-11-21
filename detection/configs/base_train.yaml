@@ -1,0 +1,49 @@
+# Configuração-base de TODOS os treinos. Os experimentos (configs/experiments/*.yaml)
+# herdam deste arquivo e mudam só o que estão testando (uma coisa por vez).
+#
+# Chaves de topo (do pipeline):
+#   dataset           versão do dataset preparado (data/<dataset>/), gerada pelo 02_prepare_dataset.py
+#   data              fold0..fold4 (validação = esse fold), trainval, ou caminho de um data.yaml
+#   model             pesos iniciais (.pt, pré-treinados no COCO) ou arquitetura (.yaml, do zero)
+#   device            auto (cuda > mps > cpu), 0, mps, cpu
+#   selection_metric  métrica usada para escolher a melhor variante de cada experimento
+#   op_conf           limiar de confiança do "ponto de operação" (P_op/R_op/F1_op)
+#   oversample        estratégia contra desbalanceamento (null = desligado); ver 05_imbalance.yaml
+#   train             argumentos repassados a model.train() da Ultralytics
+
+dataset: pavement_v1
+data: fold0
+model: yolo26n.pt
+device: auto
+selection_metric: mAP50_95   # o mesmo critério que a Ultralytics usa para salvar o best.pt
+op_conf: 0.25
+oversample: null
+
+train:
+  epochs: 150          # dataset pequeno (~100 imagens de treino): poucas iterações por época
+  patience: 30         # early stopping
+  imgsz: 640
+  batch: 16
+  optimizer: auto      # com auto, lr0 é ignorado (manual, seção 10); o Optuna fixa o otimizador
+  seed: 0
+  deterministic: true
+  workers: 4
+  cache: false
+  amp: true
+  plots: true
+  val: true
+  # --- aumento de dados: padrões da Ultralytics, escritos aqui para ficarem explícitos
+  mosaic: 1.0
+  close_mosaic: 10
+  scale: 0.5
+  translate: 0.1
+  degrees: 0.0
+  shear: 0.0
+  perspective: 0.0
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  fliplr: 0.5
+  flipud: 0.0
+  mixup: 0.0
+  cutmix: 0.0
