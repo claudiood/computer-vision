@@ -12,7 +12,7 @@ Gera em <execução>/eval_val/ (ou --out):
 Uso:
   python scripts/evaluate.py --run results/experiments/02_models/yolo26n/s0_f0
   python scripts/evaluate.py --best-of 03_imgsz              # melhor variante de um experimento
-  python scripts/evaluate.py --weights caminho/best.pt --data data/pavement_v1/data_fold0.yaml --imgsz 960
+  python scripts/evaluate.py --weights caminho/best.pt --data data/pavement_v2/data_fold0.yaml --imgsz 960
 """
 from __future__ import annotations
 

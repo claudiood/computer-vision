@@ -22,7 +22,7 @@ variants:
   minus_oversampling:
     oversample: null
   minus_preprocessing:
-    dataset: pavement_v1
+    dataset: pavement_v2
   minus_imgsz:
     train: {imgsz: 640, batch: 16}
   minus_model:                        # modelo da linha de base

@@ -20,7 +20,7 @@ fotos da mesma cena (ver configs/dataset.yaml → grouping), estratificado por c
 Uso:
   python scripts/02_prepare_dataset.py                 # usa o manifesto se existir; senão cria
   python scripts/02_prepare_dataset.py --resplit       # refaz a divisão (cria manifesto novo)
-  python scripts/02_prepare_dataset.py --preprocess clahe   # cria pavement_v1_clahe com a MESMA divisão
+  python scripts/02_prepare_dataset.py --preprocess clahe   # cria pavement_v2_clahe com a MESMA divisão
 """
 from __future__ import annotations
 

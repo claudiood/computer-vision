@@ -13,7 +13,7 @@ Sai com código 1 se encontrar erro (útil para automatizar).
 
 Uso:
   python scripts/03_validate_dataset.py
-  python scripts/03_validate_dataset.py --name pavement_v1_clahe --ultralytics
+  python scripts/03_validate_dataset.py --name pavement_v2_clahe --ultralytics
 """
 from __future__ import annotations
 

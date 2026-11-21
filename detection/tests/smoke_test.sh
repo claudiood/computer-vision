@@ -23,7 +23,7 @@ step "3. preparo";             python scripts/02_prepare_dataset.py --config "$D
 step "3b. preparo de novo (deve reusar o manifesto)"; python scripts/02_prepare_dataset.py --config "$DS"
 step "3c. preparo CLAHE (mesma divisão)"; python scripts/02_prepare_dataset.py --config "$DS" --preprocess clahe
 step "4. validação";           python scripts/03_validate_dataset.py --config "$DS" --ultralytics
-step "4b. validação CLAHE";    python scripts/03_validate_dataset.py --config "$DS" --name pavement_v1_clahe
+step "4b. validação CLAHE";    python scripts/03_validate_dataset.py --config "$DS" --name pavement_v2_clahe
 step "5. dry-runs";            for e in 01 02 04 05; do python scripts/run_experiment.py $e --dry-run --set $FAST; done
 python scripts/run_experiment.py --list
 if [[ "${1:-}" == "--quick" ]]; then echo "OK (quick) — $TMP"; exit 0; fi

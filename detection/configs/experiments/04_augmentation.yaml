@@ -27,4 +27,4 @@ variants:
   close_mosaic_20:                    # mais épocas finais com imagens "normais"
     train: {close_mosaic: 20}
   clahe:                              # PRÉ-processamento: CLAHE no canal L (aula, slide 20)
-    dataset: pavement_v1_clahe        # gerado com: 02_prepare_dataset.py --preprocess clahe
+    dataset: pavement_v2_clahe        # gerado com: 02_prepare_dataset.py --preprocess clahe

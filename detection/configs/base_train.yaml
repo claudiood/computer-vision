@@ -11,7 +11,7 @@
 #   oversample        estratégia contra desbalanceamento (null = desligado); ver 05_imbalance.yaml
 #   train             argumentos repassados a model.train() da Ultralytics
 
-dataset: pavement_v1
+dataset: pavement_v2
 data: fold0
 model: yolo26n.pt
 device: auto

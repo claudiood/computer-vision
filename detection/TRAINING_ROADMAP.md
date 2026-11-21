@@ -16,7 +16,7 @@ O manual do aluno (*Treinando a YOLO para detecção de objetos*) e a aula 10 (*
 |---|---|---|
 | Começar com `yolo26n.pt`, `imgsz=640`, `epochs=100`, `patience=20` | Adotado como linha de base, com `epochs=150` e `patience=30` | Com cerca de 100 imagens de treino há poucas iterações por época. O early stopping encerra antes se não houver melhora. |
 | mAP50-95 como métrica principal | Adotado para escolher entre variantes. P, R e F1 também são registrados, por classe e em dois limiares de confiança | É o mesmo critério que a Ultralytics usa para salvar o `best.pt`, o que mantém a seleção coerente. |
-| Dividir por grupo para evitar vazamento | Implementado, com uma mudança importante (seção 1.3) | Agrupar pelo anotador não basta: as fotos foram tiradas em saídas conjuntas e depois distribuídas entre as pessoas. |
+| Dividir por grupo para evitar vazamento | Implementado (`pavedet/splitting.py`), mas **desligado por decisão do grupo** (P3, seção 1.4) | A divisão é feita por imagem. O agrupamento pode ser religado em `configs/dataset.yaml`. |
 | Usar o teste uma única vez | Implementado com uma trava (`final_test.py`) | Impede que o teste vire validação sem que ninguém perceba. |
 | Uma mudança por vez, contra uma linha de base, com seed fixa | Adotado em todos os experimentos | Acrescentado: o ruído entre seeds é medido e usado como critério para avançar (seção 3). |
 | `optimizer=auto` ignora o `lr0` | O Optuna fixa o otimizador junto com o `lr0` | Sem isso, a busca de `lr0` não teria efeito nenhum. |
@@ -60,14 +60,14 @@ A auditoria foi gerada por `scripts/01_audit_dataset.py`. O relatório completo 
 
 | # | Problema | Evidência | Decisão |
 |---|---|---|---|
-| P1 | **32 imagens sem anotação que não são fundo.** Várias mostram buracos e rachaduras visíveis. | `results/audit/unlabeled.jpg` | Ficam fora do dataset (`unlabeled_policy: exclude`). Usá-las como fundo ensinaria ao modelo que dano é fundo. O grupo decidiu não anotá-las (seção 9). |
+| P1 | **32 imagens sem anotação que não são fundo.** Várias mostram buracos e rachaduras visíveis. | `results/audit/unlabeled.jpg` | **Decisão do grupo:** usar as imagens como estão. As 32 entram no dataset como imagens sem objetos (`unlabeled_policy: background`). Consequência na seção 9. |
 | P2 | **O critério de anotação muda de pessoa para pessoa.** Na classe remendo aparecem tampa de bueiro e meio-fio pintado. Na classe rachadura aparecem faixa pintada e desgaste da superfície. Algumas caixas de rachadura cobrem a largura inteira da rua, enquanto outras cobrem só um trecho. | `results/audit/crops/*.jpg`, uma linha por anotador, com o nome de cada imagem | O grupo decidiu manter as anotações como estão. Fica registrado como limitação do dataset (seção 9). |
-| P3 | **A mesma cena aparece em fotos de anotadores diferentes.** As fotos foram tiradas em saídas conjuntas, com o mesmo celular, e divididas depois. O mesmo buraco aparece em fotos de duas pessoas com segundos de diferença. | Horários do EXIF em `results/audit/images.csv` | O agrupamento usa a hora do EXIF (mesma câmera, menos de 30 s de diferença) e a numeração da câmera (`IMG_4701`, `IMG_4703`) quando a foto não tem data. O resultado é cerca de 65 grupos. A divisão é feita por grupo. |
+| P3 | **A mesma cena aparece em fotos de anotadores diferentes.** As fotos foram tiradas em saídas conjuntas, com o mesmo celular, e divididas depois. O mesmo buraco aparece em fotos de duas pessoas com segundos de diferença. | Horários do EXIF em `results/audit/images.csv` | **Decisão do grupo:** dividir por imagem, sem agrupar fotos da mesma cena (agrupamento desligado em `configs/dataset.yaml`). Consequência na seção 9. |
 | P4 | Classe remendo minoritária (12%) | Contagens acima | Experimento E5 (oversampling apenas no treino). |
 | P5 | 6 imagens HEIC, das quais 1 tem nome diferente do seu `.txt` (`C35BCB13-…_1_201_a.heic` × `C35BCB13-…963.txt`) | Overlay conferido em `results/audit/overlays/` | Convertidas para JPEG no preparo. O nome é corrigido por `label_aliases` no config, e as caixas conferem com a imagem. |
 | P6 | 2 caixas degeneradas (largura 0) em `9EEC03FD-…` | Relatório da auditoria | Removidas na limpeza. O original não é alterado. |
 | P7 | Fotos com orientação EXIF girada | 7 imagens | O preparo aplica a orientação na imagem antes de salvar. Os overlays confirmam que os rótulos do Make Sense seguem a imagem já girada. |
-| P8 | Validação e teste pequenos (cerca de 20 a 25 imagens cada) | 141 imagens anotadas | As métricas variam muito entre execuções. Por isso: 3 seeds no baseline para medir o ruído, um critério de avanço baseado nesse ruído e folds opcionais para comparações apertadas. |
+| P8 | Validação e teste pequenos (cerca de 25 imagens cada) | 173 imagens | As métricas variam muito entre execuções. Por isso: 3 seeds no baseline para medir o ruído, um critério de avanço baseado nesse ruído e folds opcionais para comparações apertadas. |
 | P9 | O dHash não detecta a mesma cena vista de outro ângulo | O vizinho mais próximo fica sempre a 87 bits ou mais | O dHash é usado só para detectar cópias idênticas. O agrupamento depende da hora e da numeração (P3). |
 
 ---
@@ -106,7 +106,8 @@ detection/
 ├── tests/
 │   ├── make_synthetic_dataset.py    dataset falso para testar os scripts
 │   └── smoke_test.sh                teste de ponta a ponta (CPU, em pasta temporária)
-├── splits/pavement_v1.csv       manifesto da divisão (VERSIONADO: a mesma divisão para todo o grupo)
+├── splits/pavement_v2.csv       manifesto da divisão (VERSIONADO: a mesma divisão para todo o grupo)
+│   (splits/pavement_v1.csv é a divisão anterior, com agrupamento e sem as imagens sem rótulo; não é mais usada)
 ├── data/                        dataset preparado (gerado; não vai para o git)
 └── results/                     auditoria, execuções, comparações, Optuna e teste final (não vai para o git)
 ```
@@ -195,15 +196,15 @@ Esse comando gera o relatório em `results/audit/report.md`.
 
 ### Etapa 2 — Preparação e divisão
 
-- **Objetivo:** gerar uma cópia limpa no formato YOLO e uma divisão sem vazamento.
+- **Objetivo:** gerar uma cópia limpa no formato YOLO e a divisão em treino, validação e teste.
 - **Script:** `scripts/02_prepare_dataset.py`
 - **O que o script faz:**
   - aplica a orientação EXIF;
   - converte HEIC para JPEG;
   - reduz as imagens para no máximo 2048 px (os rótulos normalizados não mudam);
   - remove caixas inválidas;
-  - separa um **teste fixo de 15%** e divide o resto em **5 folds**, sempre por grupo de mesma cena e estratificando por classe e por anotador. A validação padrão é o fold 0, com cerca de 17% das imagens.
-- **Arquivos gerados:** `data/pavement_v1/` (imagens, rótulos, listas, `data_fold0.yaml` a `data_fold4.yaml`, `data_trainval.yaml` e `split_report.md`) e `splits/pavement_v1.csv`.
+  - separa um **teste fixo de 15%** e divide o resto em **5 folds**, por imagem (agrupamento desligado, seção 1.4) e estratificando por classe e por anotador. As imagens sem `.txt` entram como imagens sem objetos. A validação padrão é o fold 0, com cerca de 17% das imagens.
+- **Arquivos gerados:** `data/pavement_v2/` (imagens, rótulos, listas, `data_fold0.yaml` a `data_fold4.yaml`, `data_trainval.yaml` e `split_report.md`) e `splits/pavement_v2.csv`.
 - **Por que o manifesto vai para o git:** quem rodar o preparo depois recebe exatamente a mesma divisão. Se o dataset mudar (reanotação, imagens novas), o script recusa reaproveitar o manifesto. Nesse caso, crie uma versão nova com `--resplit --name pavement_v2`, para não misturar resultados de divisões diferentes.
 
 ```bash
@@ -213,8 +214,8 @@ python scripts/02_prepare_dataset.py --preprocess clahe
 
 O que cada linha faz:
 
-- A primeira linha cria `data/pavement_v1` e o manifesto da divisão.
-- A segunda cria `data/pavement_v1_clahe`, com CLAHE aplicado e a mesma divisão. Ela só é necessária para a variante `clahe` do E4.
+- A primeira linha cria `data/pavement_v2` e o manifesto da divisão.
+- A segunda cria `data/pavement_v2_clahe`, com CLAHE aplicado e a mesma divisão. Ela só é necessária para a variante `clahe` do E4.
 
 **Critério para avançar:** em `split_report.md`, cada partição tem as 3 classes e a linha "Grupos que atravessam partições" mostra 0.
 
@@ -227,10 +228,10 @@ O que cada linha faz:
 
 ```bash
 python scripts/03_validate_dataset.py --ultralytics
-python scripts/03_validate_dataset.py --name pavement_v1_clahe
+python scripts/03_validate_dataset.py --name pavement_v2_clahe
 ```
 
-A primeira linha confere `pavement_v1` e testa se a Ultralytics consegue ler o dataset. A segunda confere a versão com CLAHE.
+A primeira linha confere `pavement_v2` e testa se a Ultralytics consegue ler o dataset. A segunda confere a versão com CLAHE.
 
 ### Etapa 4 — E1: linha de base
 
@@ -488,13 +489,15 @@ Esse comando roda o pipeline inteiro com dados falsos, numa pasta temporária. N
 
 ## 9. Limitações conhecidas do dataset
 
-O grupo decidiu treinar com as anotações que já existem, sem reanotar. Isso traz duas limitações, que devem constar no relatório.
+O grupo decidiu usar o dataset como está: sem reanotar, com as imagens sem anotação incluídas e com a divisão feita por imagem. Isso traz três limitações, que devem constar no relatório.
 
-- **Imagens sem anotação.** 32 das 173 imagens não têm `.txt` e ficam fora do treino, da validação e do teste. Várias mostram buracos e rachaduras, então não servem como exemplos de fundo. O modelo é treinado e avaliado com 141 imagens.
+- **Imagens sem anotação usadas como fundo.** As 32 imagens sem `.txt` entram no treino, na validação e no teste como imagens sem nenhum dano. Várias delas mostram buracos e rachaduras. No treino, isso ensina o modelo a não marcar esses danos. Na avaliação, um dano encontrado numa dessas imagens conta como falso positivo.
+- **Divisão por imagem, sem agrupar a mesma cena.** Há fotos do mesmo dano tiradas com segundos de diferença, muitas vezes anotadas por pessoas diferentes. Com a divisão por imagem, fotos da mesma cena podem ficar uma no treino e outra na validação ou no teste. Nesse caso, a validação e o teste avaliam o modelo em cenas que ele já viu no treino, e as métricas tendem a ficar acima do desempenho em fotos de ruas novas.
 - **Critério de anotação diferente entre anotadores.** Há tampas de bueiro e meio-fio pintado anotados como remendo, e faixa pintada e desgaste da superfície anotados como rachadura. Algumas rachaduras têm uma caixa para a rua inteira, outras uma caixa por trecho. O modelo aprende exemplos contraditórios, e a avaliação compara as previsões com rótulos inconsistentes. O esperado é que remendo e rachadura tenham métricas mais baixas e mais instáveis entre seeds. A pasta `results/audit/crops/` mostra exemplos por classe e por anotador.
+
+Para voltar atrás em qualquer uma das duas primeiras decisões, basta mudar `unlabeled_policy` ou os valores de `grouping` em `configs/dataset.yaml` e preparar uma versão nova do dataset com outro `prepare.name`.
 
 ## 10. Pendências antes do primeiro treino
 
-1. Rodar a auditoria de novo (`python scripts/01_audit_dataset.py`). O relatório antigo foi apagado e tinha sido gerado com parâmetros antigos de agrupamento.
-2. Combinar com o grupo onde os treinos vão rodar e manter a mesma máquina e as mesmas versões em todos os experimentos.
-3. Fazer o commit da pasta `detection/` e do manifesto `splits/*.csv` (decisão do grupo).
+1. Combinar com o grupo onde os treinos vão rodar e manter a mesma máquina e as mesmas versões em todos os experimentos.
+2. Quem for treinar: rodar `bash tests/smoke_test.sh` uma vez antes dos experimentos reais (seção 8).
