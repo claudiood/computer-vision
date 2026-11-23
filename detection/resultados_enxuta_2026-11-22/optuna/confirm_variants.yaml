@@ -1,0 +1,51 @@
+generated_from: hparams_v1
+metric: mAP50_95
+variants:
+  trial_0010:
+    train:
+      optimizer: SGD
+      lr0: 0.003071442972219265
+      lrf: 0.026632149086169142
+      momentum: 0.9099106816049582
+      weight_decay: 1.2187071211512573e-05
+      warmup_epochs: 0.07797399829228047
+      cos_lr: false
+      box: 8.51792547915206
+      cls: 1.4514674286791605
+      scale: 0.672341540978756
+      mosaic: 0.7876040334076363
+      hsv_v: 0.4642319818616446
+      degrees: 0.7681171094377857
+      close_mosaic: 20
+  trial_0009:
+    train:
+      optimizer: SGD
+      lr0: 0.0025271197203551097
+      lrf: 0.05527361503993264
+      momentum: 0.8092661752249981
+      weight_decay: 6.853925708853055e-05
+      warmup_epochs: 4.541329429833269
+      cos_lr: false
+      box: 6.936716561665378
+      cls: 1.482780544932721
+      scale: 0.3452331629069003
+      mosaic: 0.8360677737029393
+      hsv_v: 0.5808098076643587
+      degrees: 1.9011003519391974
+      close_mosaic: 18
+  trial_0008:
+    train:
+      optimizer: AdamW
+      lr0: 0.0009130093787169929
+      lrf: 0.0212853192163843
+      momentum: 0.8215757661200629
+      weight_decay: 0.00010300196600986775
+      warmup_epochs: 4.714548519562596
+      cos_lr: true
+      box: 8.218113753371068
+      cls: 0.7363555228551528
+      scale: 0.7830692496325764
+      mosaic: 0.9812236474710556
+      hsv_v: 0.32589114791268203
+      degrees: 3.9779880471390836
+      close_mosaic: 7

@@ -1,0 +1,188 @@
+{
+  "status": "completed",
+  "experiment": "08_final",
+  "variant": "final",
+  "seed": 1,
+  "fold": "0",
+  "run_dir": "/home/shadeform/computer-vision/detection/results/experiments/08_final/final/s1_f0",
+  "config": {
+    "dataset": "pavement_v2",
+    "data": "fold0",
+    "model": "yolo26n.pt",
+    "device": "auto",
+    "selection_metric": "mAP50_95",
+    "op_conf": 0.25,
+    "oversample": {
+      "method": "fixed",
+      "factors": {
+        "1": 2
+      }
+    },
+    "train": {
+      "epochs": 300,
+      "patience": 50,
+      "imgsz": 960,
+      "batch": 8,
+      "optimizer": "SGD",
+      "seed": 1,
+      "deterministic": true,
+      "workers": 4,
+      "cache": false,
+      "amp": true,
+      "plots": true,
+      "val": true,
+      "mosaic": 0.7876040334076363,
+      "close_mosaic": 20,
+      "scale": 0.672341540978756,
+      "translate": 0.1,
+      "degrees": 0.7681171094377857,
+      "shear": 0.0,
+      "perspective": 0.0,
+      "hsv_h": 0.015,
+      "hsv_s": 0.7,
+      "hsv_v": 0.4642319818616446,
+      "fliplr": 0.5,
+      "flipud": 0.0,
+      "mixup": 0.0,
+      "cutmix": 0.0,
+      "lr0": 0.003071442972219265,
+      "lrf": 0.026632149086169142,
+      "momentum": 0.9099106816049582,
+      "weight_decay": 1.2187071211512573e-05,
+      "warmup_epochs": 0.07797399829228047,
+      "cos_lr": false,
+      "box": 8.51792547915206,
+      "cls": 1.4514674286791605
+    },
+    "_inherited": "06b_optuna_confirm:trial_0010"
+  },
+  "data_yaml": "/home/shadeform/computer-vision/detection/data/pavement_v2/data_fold0.yaml",
+  "device": "0",
+  "env": {
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-149-generic-x86_64-with-glibc2.35",
+    "machine": "x86_64",
+    "cpu_count": 6,
+    "torch": "2.14.1+cu130",
+    "cuda": true,
+    "gpu": "NVIDIA RTX A6000",
+    "gpu_mem_gb": 50.9,
+    "mps": false,
+    "ultralytics": "8.4.216",
+    "ram_gb": 25.2,
+    "git": {
+      "commit": "0ad444a",
+      "dirty": false
+    }
+  },
+  "started": "2026-11-22 04:01:50",
+  "oversample_info": {
+    "images": 118,
+    "entries": 153,
+    "max_repeat": 2
+  },
+  "train_time_s": 397.9,
+  "gpu_peak_mb": 2856.6,
+  "epochs_run": 80,
+  "best_epoch": 30,
+  "train_time_csv_s": 386.384,
+  "weights": {
+    "best": "/home/shadeform/computer-vision/detection/results/experiments/08_final/final/s1_f0/weights/best.pt",
+    "last": "/home/shadeform/computer-vision/detection/results/experiments/08_final/final/s1_f0/weights/last.pt",
+    "best_size_mb": 5.5
+  },
+  "metrics": {
+    "P": 0.5957786651116086,
+    "R": 0.36580444644960775,
+    "mAP50": 0.4089435947408096,
+    "mAP50_95": 0.2330383808147072,
+    "fitness": 0.2330383808147072,
+    "F1": 0.451689235935806,
+    "best_conf": 0.1871871871871872,
+    "per_class": {
+      "rachadura": {
+        "instances": 62,
+        "P": 0.31234230233945004,
+        "R": 0.24193548387096775,
+        "F1": 0.272667200201236,
+        "mAP50": 0.20166231065707418,
+        "mAP50_95": 0.06944417412312401,
+        "P_op": 0.5,
+        "R_op": 0.12903225806451613,
+        "F1_op": 0.20512820512820512,
+        "TP": 8,
+        "FP": 8,
+        "FN": 54
+      },
+      "remendo": {
+        "instances": 13,
+        "P": 0.82818146657506,
+        "R": 0.46153846153846156,
+        "F1": 0.5927451249308375,
+        "mAP50": 0.6458531746031746,
+        "mAP50_95": 0.4546112332112333,
+        "P_op": 1.0,
+        "R_op": 0.23076923076923078,
+        "F1_op": 0.375,
+        "TP": 3,
+        "FP": 0,
+        "FN": 10
+      },
+      "buraco": {
+        "instances": 33,
+        "P": 0.6468122264203158,
+        "R": 0.3939393939393939,
+        "F1": 0.48965538267534453,
+        "mAP50": 0.3793152989621802,
+        "mAP50_95": 0.1750597351097644,
+        "P_op": 0.6,
+        "R_op": 0.2727272727272727,
+        "F1_op": 0.37499999999999994,
+        "TP": 9,
+        "FP": 6,
+        "FN": 24
+      }
+    },
+    "speed_ms": {
+      "preprocess": 8.487,
+      "inference": 7.433,
+      "loss": 0.002,
+      "postprocess": 1.822
+    },
+    "P_op": 0.7000000000000001,
+    "R_op": 0.21084292052033984,
+    "F1_op": 0.31837606837606836,
+    "P_op_micro": 0.5882352941176471,
+    "R_op_micro": 0.18518518518518517,
+    "F1_op_micro": 0.2816901408450704,
+    "op_conf": 0.25,
+    "confusion_matrix_op": [
+      [
+        8,
+        0,
+        0,
+        8
+      ],
+      [
+        0,
+        3,
+        0,
+        0
+      ],
+      [
+        2,
+        0,
+        9,
+        4
+      ],
+      [
+        52,
+        10,
+        24,
+        0
+      ]
+    ]
+  },
+  "peak_rss_mb": 5160.0,
+  "finished": "2026-11-22 04:08:35"
+}

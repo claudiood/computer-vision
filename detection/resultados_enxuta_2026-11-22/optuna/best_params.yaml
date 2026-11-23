@@ -1,0 +1,17 @@
+best_value: 0.23507594341354648
+best_trial: 10
+params:
+  train.optimizer: SGD
+  train.lr0: 0.003071442972219265
+  train.lrf: 0.026632149086169142
+  train.momentum: 0.9099106816049582
+  train.weight_decay: 1.2187071211512573e-05
+  train.warmup_epochs: 0.07797399829228047
+  train.cos_lr: false
+  train.box: 8.51792547915206
+  train.cls: 1.4514674286791605
+  train.scale: 0.672341540978756
+  train.mosaic: 0.7876040334076363
+  train.hsv_v: 0.4642319818616446
+  train.degrees: 0.7681171094377857
+  train.close_mosaic: 20
