@@ -1,11 +1,12 @@
 # E1 — Linha de base.
-# Modelo do manual (YOLO26n), imgsz 640 e TODOS os padrões da Ultralytics.
-# Três seeds: além do ponto de partida, mede o RUÍDO entre execuções idênticas.
-# Com uma validação de ~25 imagens, uma diferença menor que esse ruído não é
-# uma melhora de verdade: o desvio-padrão daqui vira o critério para avançar.
+# YOLO26n, imgsz 960 e TODOS os padrões da Ultralytics (configs/base_train.yaml).
+# Três folds (0, 1, 2): além do ponto de partida, mostra quanto o resultado varia
+# só por trocar as imagens de validação. Todos os experimentos usam os mesmos
+# três folds, então as comparações são PAREADAS (mesmo fold contra mesmo fold).
 extends: ../base_train.yaml
 name: 01_baseline
-description: YOLO26n, imgsz 640, padrões da Ultralytics, 3 seeds (mede o ruído)
-seeds: [0, 1, 2]
+description: YOLO26n, imgsz 960, padrões da Ultralytics, folds 0-2
+folds: [0, 1, 2]
+seeds: [0]
 variants:
-  yolo26n_640: {}
+  yolo26n_960: {}

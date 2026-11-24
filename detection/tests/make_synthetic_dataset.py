@@ -93,7 +93,7 @@ def main() -> None:
     cfg["source"] = {"images": str(img_dir), "labels": str(lbl_dir), "class_names_file": str(lbl_dir / "labels.txt"),
                      "annotator_dirs": str(out / "imagens/detection")}
     cfg["label_aliases"] = {}
-    cfg["prepare"]["name"] = "pavement_v2"  # mesmo nome do real: os YAMLs de experimento funcionam sem mudança
+    cfg["prepare"]["name"] = "pavement_v3"  # mesmo nome do real: os YAMLs de experimento funcionam sem mudança
     cfg["prepare"]["max_side"] = 640
     save_yaml(cfg, out / "dataset.yaml")
     print(f"Dataset sintético: {args.n} imagens em {out}")

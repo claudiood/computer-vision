@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-"""Etapa 6 — Otimização de hiperparâmetros com Optuna (só na validação).
+"""E5 — Otimização de hiperparâmetros e aumento de dados com Optuna (só na validação).
 
 O estudo fica salvo em results/optuna/<study_name>.db (SQLite): pode ser
 interrompido e continuado, e todos os trials ficam registrados. Cada trial
-também é uma execução normal em results/experiments/06_optuna/trial_XXXX/.
+também é uma execução normal em results/experiments/05_optuna/trial_XXXX/.
+
+A melhor configuração NÃO é adotada direto: a ablação (E6) a treina por
+completo nos folds 0-2 e a compara com a configuração sem Optuna.
 
 Uso:
   python scripts/tune_optuna.py                          # roda/continua o estudo de configs/optuna.yaml
-  python scripts/tune_optuna.py --n-trials 10            # mais 10 trials
+  python scripts/tune_optuna.py --n-trials 4             # mais 4 trials
   python scripts/tune_optuna.py --report                 # só relatório (importâncias, histórico)
-  python scripts/tune_optuna.py --confirm-top 3 --seeds 0 1   # treina as 3 melhores por completo (06b)
   python scripts/tune_optuna.py --dry-run                # mostra um trial sorteado, sem treinar
+
+Dois trials ao mesmo tempo na mesma GPU (opcional): rode o mesmo comando em dois
+terminais; o estudo em SQLite é compartilhado e cada processo pega trials diferentes.
 """
 from __future__ import annotations
 
@@ -41,7 +46,20 @@ def suggest(trial, space: dict) -> dict:
             flat[key] = trial.suggest_categorical(key, s["choices"])
         else:
             raise ValueError(f"tipo desconhecido em {key}: {t}")
-    return parse_overrides([f"{k}={json.dumps(v)}" for k, v in flat.items()])
+    ov = parse_overrides([f"{k}={json.dumps(v)}" for k, v in flat.items()])
+    return oversample_from_space(ov)
+
+
+def oversample_from_space(ov: dict) -> dict:
+    """`oversample.patch_factor: N` (do espaço de busca) → estratégia de oversampling do pipeline.
+
+    N = 1: sem oversampling. N > 1: imagens com remendo (classe 1) entram N vezes por época.
+    """
+    o = ov.get("oversample")
+    if isinstance(o, dict) and "patch_factor" in o:
+        f = int(o["patch_factor"])
+        ov["oversample"] = None if f <= 1 else {"method": "fixed", "factors": {1: f}}
+    return ov
 
 
 def make_sampler(optuna, spec):
@@ -112,8 +130,6 @@ def main() -> None:
     ap.add_argument("--n-trials", type=int, default=None)
     ap.add_argument("--set", nargs="*", default=[], metavar="CHAVE=VALOR", help="overrides na config-base")
     ap.add_argument("--report", action="store_true")
-    ap.add_argument("--confirm-top", type=int, default=0, help="treina as K melhores configs por completo (06b)")
-    ap.add_argument("--seeds", nargs="*", type=int, default=[0, 1], help="seeds da confirmação")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -144,26 +160,6 @@ def main() -> None:
         report(study, out_dir)
         return
 
-    if args.confirm_top:
-        done = sorted([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE],
-                      key=lambda t: t.value, reverse=True)[: args.confirm_top]
-        if not done:
-            raise SystemExit("Nenhum trial concluído ainda.")
-        exp_name = "06b_optuna_confirm"
-        exp = load_experiment(CONFIG_DIR / "experiments" / f"{exp_name}.yaml")
-        variants = {}
-        for t in done:
-            variants[f"trial_{t.number:04d}"] = t.user_attrs["overrides"]
-        save_yaml({"generated_from": oc["study_name"], "metric": metric, "variants": variants},
-                  out_dir / "confirm_variants.yaml")
-        for vname, ov in variants.items():
-            for seed in args.seeds:
-                cfg = deep_merge(deep_merge(base, ov), deep_merge(cli, {"train": {"seed": seed}}))
-                cfg["_from_trial"] = vname
-                train_run(cfg, exp["name"], vname)
-        print(f"\nCompare com: python scripts/compare.py --experiments {exp_name}")
-        return
-
     space = oc["search_space"]
     trial_ov = oc.get("trial_overrides") or {}
     key = METRIC_KEYS.get(metric)
@@ -189,7 +185,7 @@ def main() -> None:
     study.optimize(objective, n_trials=n, timeout=timeout, gc_after_trial=True,
                    catch=(RuntimeError, ValueError))
     report(study, out_dir)
-    print("\nPróximo passo: python scripts/tune_optuna.py --confirm-top 3")
+    print("\nPróximo passo (E6): python scripts/run_experiment.py 06_ablation")
 
 
 if __name__ == "__main__":

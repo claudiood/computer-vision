@@ -1,18 +1,15 @@
-# E8 — Treino definitivo com a configuração vencedora.
-# Mais épocas e paciência (o early stopping decide onde parar) e 3 seeds: o
-# resultado final é a MÉDIA ± desvio no teste, não o melhor seed (escolher o
-# melhor seed olhando o teste seria vazamento).
-# A variante trainval (opcional) treina em treino+validação, com o número de
-# épocas fixo na mediana das best_epoch das seeds; sem validação independente,
-# só use se o grupo concordar e relate isso.
+# E8 — Treino definitivo com a configuração vencedora, em TREINO + VALIDAÇÃO
+# (todas as imagens menos o teste). Como não sobra validação independente, o
+# número de épocas é fixo: a mediana da melhor época da validação cruzada (E7),
+# lida de results/cv/cv_summary.json (rode scripts/cv_report.py antes).
+# patience: 0 desliga o early stopping.
+# 3 seeds: o resultado no teste é a MÉDIA ± desvio, não o melhor seed.
+# Avaliação no teste (uma vez):
+#   python scripts/final_test.py --experiment 08_final --confirm --conf cv
 extends: ../base_train.yaml
 name: 08_final
-description: configuração final, mais épocas, 3 seeds (avaliada no teste UMA vez)
-# o melhor entre o E5 e a confirmação do Optuna (se o Optuna não ajudou, fica o E5)
-inherit_best: [05_imbalance, 06b_optuna_confirm]
+description: config vencedora em treino+validação, épocas da CV, 3 seeds (teste UMA vez)
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 06_ablation]
 seeds: [0, 1, 2]
-overrides:
-  train: {epochs: 300, patience: 50}
 variants:
-  final: {}
-  # final_trainval: {data: trainval, train: {epochs: 120, patience: 0}}   # ajuste 'epochs' antes de usar
+  final_trainval: {data: trainval, train: {epochs: cv_median, patience: 0}}

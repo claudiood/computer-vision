@@ -10,8 +10,12 @@ Proteção: a primeira execução grava results/final/TEST_LOCK.json. Rodar de n
 exige --rerun e fica registrado no relatório (o teste deixa de ser "virgem" se
 alguém ajustar o modelo depois de ver o resultado).
 
+Limiar do ponto de operação (P_op/R_op/F1_op): --conf 0.25 (padrão) ou --conf cv,
+que usa o limiar que maximizou o F1 na validação cruzada (results/cv/cv_summary.json).
+Escolher o limiar pela validação é legítimo; escolher olhando o teste não seria.
+
 Uso:
-  python scripts/final_test.py --experiment 08_final --confirm
+  python scripts/final_test.py --experiment 08_final --confirm --conf cv
 """
 from __future__ import annotations
 
@@ -35,11 +39,19 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--experiment", default="08_final")
     ap.add_argument("--variant", default=None, help="padrão: todas as variantes do experimento")
-    ap.add_argument("--conf", type=float, default=0.25)
+    ap.add_argument("--conf", default="0.25", help="limiar do ponto de operação: número ou 'cv'")
     ap.add_argument("--confirm", action="store_true", help="obrigatório: confirma que a escolha do modelo terminou")
     ap.add_argument("--rerun", action="store_true", help="roda de novo mesmo com o teste já usado (fica registrado)")
     args = ap.parse_args()
 
+    if str(args.conf).lower() == "cv":
+        cvf = RESULTS_DIR / "cv" / "cv_summary.json"
+        if not cvf.exists():
+            raise SystemExit(f"{cvf} não existe. Rode antes: python scripts/cv_report.py (ou use --conf 0.25)")
+        args.conf = float(json.loads(cvf.read_text(encoding="utf-8"))["best_conf_median"])
+        print(f"Limiar do ponto de operação vindo da validação cruzada: conf={args.conf:.3f}")
+    else:
+        args.conf = float(args.conf)
     if not args.confirm:
         raise SystemExit("O teste deve ser usado UMA vez, depois de TODAS as decisões. Se é o caso, rode com --confirm.")
     history = json.loads(LOCK.read_text(encoding="utf-8")) if LOCK.exists() else []
@@ -57,7 +69,10 @@ def main() -> None:
         imgsz = e["config"]["train"].get("imgsz", 640)
         out = out_root / f"{e['variant']}_s{e['seed']}_f{e['fold']}"
         print(f"\n== {e['variant']} seed {e['seed']} ({e['run_dir']})")
-        m = evaluate(Path(e["weights"]["best"]), Path(e["data_yaml"]), "test", out, imgsz=imgsz,
+        # em treino+validação a "validação" está dentro do treino: o best.pt escolhido por ela não
+        # significa nada. Vale o modelo da última época (o número de épocas veio da validação cruzada).
+        wkey = "last" if str(e["config"].get("data")) == "trainval" else "best"
+        m = evaluate(Path(e["weights"][wkey]), Path(e["data_yaml"]), "test", out, imgsz=imgsz,
                      device=e.get("device"), conf=args.conf)
         print(summary_line(m))
         row = {"variant": e["variant"], "seed": e["seed"], "val_mAP50_95": e["metrics"]["mAP50_95"],
@@ -85,9 +100,17 @@ def main() -> None:
             v = g[c].astype(float)
             L.append(f"| {c} | {v.mean():.3f} | {v.std(ddof=1) if len(v) > 1 else float('nan'):.3f} | "
                      f"{v.min():.3f} | {v.max():.3f} |")
-        pick = g.sort_values("val_mAP50_95", ascending=False).iloc[0]
-        L += ["", f"Modelo a entregar (escolhido pela VALIDAÇÃO, não pelo teste): seed {int(pick['seed'])} — "
-              f"`{[e for e in runs if e['variant'] == var and e['seed'] == pick['seed']][0]['weights']['best']}`", ""]
+        var_runs = [e for e in runs if e["variant"] == var]
+        if str(var_runs[0]["config"].get("data")) == "trainval":
+            # treinado em treino+validação: não há validação independente para escolher a seed.
+            # Todas seguem a mesma receita; entrega-se a seed 0 (escolha fixa, sem olhar o teste).
+            pick_seed, why = min(e["seed"] for e in var_runs), "seed fixa (treino em treino+validação)"
+        else:
+            pick_seed, why = int(g.sort_values("val_mAP50_95", ascending=False).iloc[0]["seed"]), \
+                "escolhido pela VALIDAÇÃO, não pelo teste"
+        pw = [e for e in var_runs if e["seed"] == pick_seed][0]["weights"]
+        w = pw["last"] if str(var_runs[0]["config"].get("data")) == "trainval" else pw["best"]
+        L += ["", f"Modelo a entregar ({why}): seed {pick_seed} — `{w}`", ""]
     (out_root / "test_report.md").write_text("\n".join(L), encoding="utf-8")
     history.append({"when": time.strftime("%Y-%m-%d %H:%M:%S"), "experiment": args.experiment,
                     "runs": [e["run_dir"] for e in runs], "report": str(out_root / "test_report.md")})

@@ -1,0 +1,19 @@
+# E4 — Pré-processamento CLAHE (contraste local no canal L), em duas intensidades.
+# Diferente do aumento de dados, o CLAHE é aplicado do mesmo jeito em treino,
+# validação, teste e uso (predict.py o reaplica). Por isso cada intensidade é uma
+# versão própria do dataset, com a MESMA divisão, gerada antes por:
+#   python scripts/02_prepare_dataset.py --preprocess clahe --clahe-clip 1.0   # → pavement_v3_clahe1
+#   python scripts/02_prepare_dataset.py --preprocess clahe --clahe-clip 2.0   # → pavement_v3_clahe2
+# "Sem CLAHE" é a melhor configuração do E1–E3, já treinada (referência).
+extends: ../base_train.yaml
+name: 04_clahe
+description: CLAHE clipLimit 1.0 e 2.0 na melhor config do E1-E3, folds 0-2
+inherit_best: [01_baseline, 02_models, 03_imgsz]
+folds: [0, 1, 2]
+seeds: [0]
+include_best:
+  sem CLAHE (E1-E3): [01_baseline, 02_models, 03_imgsz]
+reference: sem CLAHE (E1-E3)
+variants:
+  clahe1: {dataset: pavement_v3_clahe1}
+  clahe2: {dataset: pavement_v3_clahe2}

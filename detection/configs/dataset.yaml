@@ -16,9 +16,11 @@ label_aliases:
   C35BCB13-3E29-4163-8A9D-FD28C694A963_1_201_a.heic: C35BCB13-3E29-4163-8A9D-FD28C694A963.txt
 
 # Imagens sem .txt: "exclude" (ficam fora) ou "background" (entram como imagens sem objetos).
-# Decisão do grupo: usar as imagens como estão, inclusive as 32 sem anotação (background).
-unlabeled_policy: background
-# Imagens confirmadas pelo grupo como fundo verdadeiro (sem dano), mesmo com policy=exclude.
+# pavement_v3 (nova rotulação): imagem sem .txt fica FORA. Uma imagem só entra como
+# fundo (sem objetos) se alguém conferiu que ela não tem dano nenhum: liste-a abaixo.
+# Fundo com dano visível ensina o modelo a ignorar o dano e conta acerto como falso positivo.
+unlabeled_policy: exclude
+# Imagens conferidas pelo grupo como fundo verdadeiro (sem dano). Ex.: [IMG_1234.jpg]
 background_images: []
 # Imagens a excluir do dataset (ex.: decisão do grupo após a auditoria).
 exclude: []
@@ -27,21 +29,21 @@ clean:
   min_wh: 0.001        # caixas com largura/altura normalizada menor que isso são removidas
 
 prepare:
-  name: pavement_v2    # nome da versão do dataset preparado (data/<name>/)
-  max_side: 2048       # reduz fotos de 12 MP: suficiente para imgsz até 1280, cache/IO bem menores
+  name: pavement_v3    # nome da versão do dataset preparado (data/<name>/): nova rotulação
+  max_side: 1280       # = maior imgsz testado (1280). Imagens menores = leitura e cache mais rápidos
   jpeg_quality: 95
   test_fraction: 0.15  # teste fixo, usado UMA vez no fim
   folds: 5             # folds sobre o restante; o fold 0 é a validação padrão (~17% do total)
   seed: 42
   restarts: 300        # reinícios da busca de divisão estratificada
-  # Agrupamento de fotos da MESMA CENA (ficariam sempre na mesma partição).
-  # A auditoria mostrou que as fotos foram tiradas em saídas de grupo com o mesmo
-  # celular e depois divididas entre os anotadores: o mesmo buraco aparece em
-  # fotos de pessoas diferentes, com segundos de diferença. Por isso o
-  # agrupamento usa data/hora do EXIF e numeração da câmera, não o anotador.
-  # Decisão do grupo: dividir por imagem, sem agrupar fotos da mesma cena (tudo em 0 = desligado).
-  # Para voltar a agrupar: hash_threshold: 70, time_window_s: 30, seq_window: 2.
+  # Agrupamento de fotos da MESMA CENA (ficam sempre na mesma partição).
+  # As fotos foram tiradas em saídas de grupo com o mesmo celular e depois
+  # divididas entre os anotadores: o mesmo buraco aparece em fotos de pessoas
+  # diferentes, com segundos de diferença. Sem agrupar, a validação e o teste
+  # avaliam cenas que o modelo já viu no treino (métricas otimistas).
+  # Por isso o agrupamento usa data/hora do EXIF, numeração da câmera e dHash.
+  # Para desligar (dividir por imagem): os três valores em 0.
   grouping:
-    hash_threshold: 0    # dHash 256 bits: <= N bits = cópia/reexportação
-    time_window_s: 0     # mesma câmera e < N s entre as fotos = mesma cena
-    seq_window: 0        # fotos sem data: numeração da câmera a até N números = mesma sequência
+    hash_threshold: 70   # dHash 256 bits: <= N bits = cópia/reexportação
+    time_window_s: 30    # mesma câmera e < N s entre as fotos = mesma cena
+    seq_window: 2        # fotos sem data: numeração da câmera a até N números = mesma sequência

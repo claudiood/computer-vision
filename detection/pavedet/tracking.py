@@ -110,3 +110,23 @@ def best_variant(experiment: str, metric: str, entries: list[dict] | None = None
     best = max(score, key=score.get)
     runs = sorted(by_var[best], key=lambda r: r["metrics"][metric], reverse=True)
     return best, runs[0]["config"], runs
+
+
+def best_of(experiments: str | list[str], metric: str, entries: list[dict] | None = None):
+    """Melhor variante entre VÁRIOS experimentos (média de `metric` entre as execuções da variante).
+
+    Retorna (score, experimento, variante, config da melhor execução, execuções da variante)
+    ou None se nenhum dos experimentos tem execuções concluídas. Usado pela herança
+    `inherit_best`, pelo `include_best` do compare.py e pelo cv_report.py.
+    """
+    entries = entries if entries is not None else read_registry()
+    best = None
+    for name in [experiments] if isinstance(experiments, str) else experiments:
+        try:
+            var, cfg, runs = best_variant(name, metric, entries)
+        except SystemExit:
+            continue
+        score = float(np.mean([r["metrics"][metric] for r in runs]))
+        if best is None or score > best[0]:
+            best = (score, name, var, cfg, runs)
+    return best

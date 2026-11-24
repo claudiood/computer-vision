@@ -20,7 +20,8 @@ fotos da mesma cena (ver configs/dataset.yaml → grouping), estratificado por c
 Uso:
   python scripts/02_prepare_dataset.py                 # usa o manifesto se existir; senão cria
   python scripts/02_prepare_dataset.py --resplit       # refaz a divisão (cria manifesto novo)
-  python scripts/02_prepare_dataset.py --preprocess clahe   # cria pavement_v2_clahe com a MESMA divisão
+  python scripts/02_prepare_dataset.py --preprocess clahe --clahe-clip 1.0   # cria pavement_v3_clahe1 (MESMA divisão)
+  python scripts/02_prepare_dataset.py --preprocess clahe --clahe-clip 2.0   # cria pavement_v3_clahe2
 """
 from __future__ import annotations
 
@@ -66,7 +67,9 @@ def main() -> None:
     cfg = load_dataset_cfg(args.config)
     pc = cfg["prepare"]
     split_name = args.name or pc["name"]  # a divisão (manifesto) é a da versão-base
-    name = split_name if args.preprocess == "none" else f"{split_name}_{args.preprocess}"
+    # o nome da versão com CLAHE inclui o clipLimit: pavement_v3_clahe1, pavement_v3_clahe2, ...
+    suffix = f"clahe{args.clahe_clip:g}".replace(".", "p") if args.preprocess == "clahe" else args.preprocess
+    name = split_name if args.preprocess == "none" else f"{split_name}_{suffix}"
     pre_spec = None if args.preprocess == "none" else {"method": args.preprocess, "clip_limit": args.clahe_clip,
                                                          "tile": args.clahe_tile}
     max_side = args.max_side or pc["max_side"]
@@ -124,7 +127,7 @@ def main() -> None:
         if missing:
             raise SystemExit(f"{len(missing)} imagens não estão no manifesto {manifest_path.name} "
                              f"(ex.: {missing[:3]}). O dataset mudou: rode com --resplit e um --name novo "
-                             "(ex.: pavement_v2) para não misturar resultados de divisões diferentes.")
+                             "(ex.: pavement_v4) para não misturar resultados de divisões diferentes.")
         for it in items:
             split_of[it.name] = prev[it.name]["split"]
             fold_of[it.name] = int(prev[it.name]["fold"]) if prev[it.name]["fold"] not in ("", "-1") else -1

@@ -1,74 +1,41 @@
-# Roteiro de treinamento — Detecção de danos em pavimentos com YOLO
+# Roteiro de treinamento — Detecção de danos em pavimentos com YOLO (pavement_v3)
 
-Este roteiro cobre o pipeline completo para treinar um detector de três classes de dano em pavimento: rachadura (crack), remendo (patch) e buraco (pothole). Os dados de origem estão em `dataset/detection` e todo o código fica na pasta `detection/` do repositório.
+Este roteiro cobre o pipeline para treinar um detector de três classes de dano em pavimento: **rachadura** (crack), **remendo** (patch) e **buraco** (pothole). Os dados de origem ficam em `dataset/detection` e o código na pasta `detection/`.
 
-Nenhum treino foi executado com o dataset real. Este documento descreve o que deve ser rodado, em que ordem, por quê, e como decidir cada passo.
+Esta é a versão para a **nova rotulação** (`pavement_v3`). A rodada anterior (`pavement_v2`, resultados em `resultados_enxuta_2026-11-22/`) foi descartada: as 32 imagens sem anotação entravam como fundo mesmo tendo danos visíveis, o critério de anotação mudava entre as pessoas e a divisão não separava fotos da mesma cena. Os números daquela rodada não são comparáveis com os desta.
+
+Orçamento: **cerca de 5 horas** numa A6000 com 6 vCPUs (seção 6).
 
 ---
 
-## 1. Análise inicial
+## 1. Antes de treinar: dados
 
-### 1.1 Documentos de referência
+### 1.1 Guia de rotulação (todos seguem o mesmo)
 
-O manual do aluno (*Treinando a YOLO para detecção de objetos*) e a aula 10 (*Pré-processamento e aumento de dados*) foram usados como base. A tabela mostra o que foi adotado, o que foi ajustado e por quê.
-
-| Recomendação | O que foi feito | Justificativa |
+| Classe | Como anotar | Não é esta classe |
 |---|---|---|
-| Começar com `yolo26n.pt`, `imgsz=640`, `epochs=100`, `patience=20` | Adotado como linha de base, com `epochs=150` e `patience=30` | Com cerca de 100 imagens de treino há poucas iterações por época. O early stopping encerra antes se não houver melhora. |
-| mAP50-95 como métrica principal | Adotado para escolher entre variantes. P, R e F1 também são registrados, por classe e em dois limiares de confiança | É o mesmo critério que a Ultralytics usa para salvar o `best.pt`, o que mantém a seleção coerente. |
-| Dividir por grupo para evitar vazamento | Implementado (`pavedet/splitting.py`), mas **desligado por decisão do grupo** (P3, seção 1.4) | A divisão é feita por imagem. O agrupamento pode ser religado em `configs/dataset.yaml`. |
-| Usar o teste uma única vez | Implementado com uma trava (`final_test.py`) | Impede que o teste vire validação sem que ninguém perceba. |
-| Uma mudança por vez, contra uma linha de base, com seed fixa | Adotado em todos os experimentos | Acrescentado: o ruído entre seeds é medido e usado como critério para avançar (seção 3). |
-| `optimizer=auto` ignora o `lr0` | O Optuna fixa o otimizador junto com o `lr0` | Sem isso, a busca de `lr0` não teria efeito nenhum. |
-| Escolher o aumento de dados pelo domínio | `flipud` excluído; giro pequeno, luz, escala e perspectiva testados | As fotos são em perspectiva (rua e céu). Uma foto espelhada na vertical não acontece no uso real. |
-| CLAHE e outros pré-processamentos devem ser testados | O CLAHE virou uma variante do experimento E4, aplicada no preparo e reaplicada no `predict.py` | O pré-processamento precisa ser idêntico no treino, na validação, no teste e no uso. |
-| Matriz de confusão do `val()` | Não é usada para P/R/F1 no ponto de operação. Uma matriz própria é calculada com `conf=0.25` | O `val()` gera a matriz com `conf=0.001`, o limiar usado no cálculo do mAP, que não representa o uso real. |
+| rachadura (0) | Uma caixa por **trecho contínuo**. Rachadura longa ou diagonal vira várias caixas seguidas, nunca uma caixa da rua inteira. | Faixa pintada, junta de dilatação, desgaste superficial, sombra |
+| remendo (1) | Uma caixa cobrindo a área do reparo | Tampa de bueiro, meio-fio, grade |
+| buraco (2) | Depressão com perda de material; caixa justa na borda. Buraco dentro de remendo: anote os dois. | Poça sem buraco, sombra |
 
-### 1.2 Ambiente
+Regras gerais:
 
-| Item | Situação encontrada |
-|---|---|
-| Repositório | Usar só o clone `computer-vision` (atualizar com `git pull`). A antiga `computer-vision-main` era um ZIP desatualizado e foi apagada. |
-| Scripts existentes | `scripts/train.py`, `bench.py` e `split.py` são de **classificação**: usam `top1` e `split-folders` sem grupos. Não foram alterados. |
-| Onde treinar | Defina antes de começar: no Mac (GPU via `mps`), no Colab (CUDA) ou na máquina de quem tiver GPU NVIDIA. O pipeline escolhe sozinho entre `cuda`, `mps` e `cpu`. |
-| Bibliotecas | Veja `detection/requirements.txt`. A versão `ultralytics>=8.4` é necessária para a YOLO26. |
+- Anote **todos** os danos visíveis da imagem. Dano sem caixa vira erro na avaliação.
+- Danos muito pequenos ou ilegíveis ficam de fora, do mesmo jeito para todo mundo.
+- **Imagem sem `.txt` fica fora do dataset** (`unlabeled_policy: exclude`). Uma imagem só entra como fundo se alguém conferiu que ela não tem dano nenhum; nesse caso, liste-a em `background_images` no `configs/dataset.yaml`.
+- Revisão cruzada: cada imagem é conferida por uma segunda pessoa. Vale começar com umas 10 imagens que todos anotam e comparar, para calibrar o grupo.
+- Ao exportar do Make Sense, confira se a ordem do `labels.txt` continua `rachadura, remendo, buraco`.
 
-### 1.3 Auditoria do dataset
+### 1.2 O que muda no preparo (`configs/dataset.yaml`)
 
-A auditoria foi gerada por `scripts/01_audit_dataset.py`. O relatório completo fica em `detection/results/audit/report.md`.
+| Item | Valor | Por quê |
+|---|---|---|
+| `unlabeled_policy` | `exclude` | Fundo com dano ensina o modelo a ignorar o dano e conta acerto como falso positivo |
+| `grouping` | `hash_threshold: 70`, `time_window_s: 30`, `seq_window: 2` | Fotos da mesma cena (mesmo celular, segundos de diferença) ficam sempre na mesma partição. Sem isso, a validação e o teste avaliam cenas já vistas no treino |
+| `prepare.name` | `pavement_v3` | Versão nova: divisão e manifesto novos |
+| `prepare.max_side` | `1280` | Igual ao maior `imgsz` testado. Imagens menores são mais rápidas de ler |
 
-| Item | Valor |
-|---|---|
-| Imagens | 173: 141 com `.txt` e 32 sem |
-| Caixas | 645 (média de 4,6 por imagem anotada) |
-| Ordem das classes (`labels.txt`) | `0` rachadura · `1` remendo · `2` buraco |
-| Instâncias por classe | rachadura 366 (56,7%) · buraco 200 (31,0%) · remendo 79 (12,2%) |
-| Imagens que contêm a classe | rachadura 118 · buraco 84 · remendo 49 |
-| Formatos | 93 `.jpeg`, 74 `.jpg` e 6 `.heic` |
-| Resolução | de 0,17 a 16 MP (mediana de 1,2 MP), 10 resoluções diferentes, 7 fotos com orientação EXIF girada |
-| Menor lado da caixa em `imgsz=640` (mediana) | rachadura 80 px · remendo 61 px · buraco 44 px |
-
-| Anotador | Imagens | Com `.txt` | Rachadura | Remendo | Buraco |
-|---|---|---|---|---|---|
-| andressa | 35 | 25 | 64 | 16 | 37 |
-| claudio | 31 | 23 | 58 | 12 | 45 |
-| duda | 36 | 30 | 58 | 20 | 36 |
-| edmar | 36 | 36 | 140 | 10 | 57 |
-| pamela | 35 | 27 | 46 | 21 | 25 |
-
-### 1.4 Problemas encontrados e decisões
-
-| # | Problema | Evidência | Decisão |
-|---|---|---|---|
-| P1 | **32 imagens sem anotação que não são fundo.** Várias mostram buracos e rachaduras visíveis. | `results/audit/unlabeled.jpg` | **Decisão do grupo:** usar as imagens como estão. As 32 entram no dataset como imagens sem objetos (`unlabeled_policy: background`). Consequência na seção 9. |
-| P2 | **O critério de anotação muda de pessoa para pessoa.** Na classe remendo aparecem tampa de bueiro e meio-fio pintado. Na classe rachadura aparecem faixa pintada e desgaste da superfície. Algumas caixas de rachadura cobrem a largura inteira da rua, enquanto outras cobrem só um trecho. | `results/audit/crops/*.jpg`, uma linha por anotador, com o nome de cada imagem | O grupo decidiu manter as anotações como estão. Fica registrado como limitação do dataset (seção 9). |
-| P3 | **A mesma cena aparece em fotos de anotadores diferentes.** As fotos foram tiradas em saídas conjuntas, com o mesmo celular, e divididas depois. O mesmo buraco aparece em fotos de duas pessoas com segundos de diferença. | Horários do EXIF em `results/audit/images.csv` | **Decisão do grupo:** dividir por imagem, sem agrupar fotos da mesma cena (agrupamento desligado em `configs/dataset.yaml`). Consequência na seção 9. |
-| P4 | Classe remendo minoritária (12%) | Contagens acima | Experimento E5 (oversampling apenas no treino). |
-| P5 | 6 imagens HEIC, das quais 1 tem nome diferente do seu `.txt` (`C35BCB13-…_1_201_a.heic` × `C35BCB13-…963.txt`) | Overlay conferido em `results/audit/overlays/` | Convertidas para JPEG no preparo. O nome é corrigido por `label_aliases` no config, e as caixas conferem com a imagem. |
-| P6 | 2 caixas degeneradas (largura 0) em `9EEC03FD-…` | Relatório da auditoria | Removidas na limpeza. O original não é alterado. |
-| P7 | Fotos com orientação EXIF girada | 7 imagens | O preparo aplica a orientação na imagem antes de salvar. Os overlays confirmam que os rótulos do Make Sense seguem a imagem já girada. |
-| P8 | Validação e teste pequenos (cerca de 25 imagens cada) | 173 imagens | As métricas variam muito entre execuções. Por isso: 3 seeds no baseline para medir o ruído, um critério de avanço baseado nesse ruído e folds opcionais para comparações apertadas. |
-| P9 | O dHash não detecta a mesma cena vista de outro ângulo | O vizinho mais próximo fica sempre a 87 bits ou mais | O dHash é usado só para detectar cópias idênticas. O agrupamento depende da hora e da numeração (P3). |
+A divisão continua: teste fixo de 15% (usado **uma vez**, no fim) e 5 folds sobre o resto, estratificados por classe e por anotador.
 
 ---
 
@@ -77,427 +44,335 @@ A auditoria foi gerada por `scripts/01_audit_dataset.py`. O relatório completo 
 ```
 detection/
 ├── TRAINING_ROADMAP.md          este documento
-├── requirements.txt             bibliotecas
-├── .gitignore                   data/, results/ e *.pt não vão para o git
+├── requirements.txt
 ├── configs/
-│   ├── dataset.yaml             caminhos, classes, aliases, política de imagens sem rótulo, divisão
-│   ├── base_train.yaml          configuração-base de todo treino (aumento de dados explícito)
-│   ├── optuna.yaml              espaço de busca e configuração do estudo
+│   ├── dataset.yaml             caminhos, classes, política de imagens sem rótulo, divisão, agrupamento
+│   ├── base_train.yaml          configuração-base de todo treino
+│   ├── optuna.yaml              E5: espaço de busca e configuração do estudo
 │   └── experiments/
-│       ├── 01_baseline.yaml     02_models.yaml     03_imgsz.yaml
-│       ├── 04_augmentation.yaml 05_imbalance.yaml  06b_optuna_confirm.yaml
-│       └── 07_ablation.yaml     08_final.yaml
-├── pavedet/                     funções reutilizáveis (o código não se repete entre scripts)
+│       01_baseline.yaml  02_models.yaml  03_imgsz.yaml  04_clahe.yaml
+│       06_ablation.yaml  07_cv.yaml      08_final.yaml
+├── pavedet/                     funções reutilizáveis
 │   ├── config.py                YAML, herança (extends), overrides (--set chave=valor)
 │   ├── io_utils.py              imagens (HEIC/EXIF), rótulos YOLO, limpeza, dHash
 │   ├── dataset.py               leitura do dataset de origem e do anotador
 │   ├── splitting.py             grupos de mesma cena e divisão estratificada por grupo
-│   ├── preprocess.py            CLAHE (pré-processamento determinístico)
-│   ├── training.py              monta a configuração, treina, valida e registra; oversampling
-│   ├── metrics.py               P/R/F1/mAP por classe e ponto de operação com matriz própria
+│   ├── preprocess.py            CLAHE
+│   ├── training.py              monta a configuração (herança), treina, valida e registra; oversampling
+│   ├── metrics.py               P/R/F1/mAP por classe e ponto de operação
 │   ├── evaluation.py            avaliação completa e tempo de inferência
-│   ├── tracking.py              registro (run_meta.json, registry.jsonl), preservação, melhor variante
+│   ├── tracking.py              registro (run_meta.json, registry.jsonl), melhor variante
 │   ├── plots.py                 gráficos
-│   └── env.py                   device, versões, git, memória
+│   └── env.py                   device, versões, memória
 ├── scripts/
-│   ├── 00_check_env.py          01_audit_dataset.py   02_prepare_dataset.py   03_validate_dataset.py
-│   ├── run_experiment.py        train.py (treino avulso)   tune_optuna.py
-│   ├── compare.py               evaluate.py   final_test.py   predict.py
-├── tests/
-│   ├── make_synthetic_dataset.py    dataset falso para testar os scripts
-│   └── smoke_test.sh                teste de ponta a ponta (CPU, em pasta temporária)
-├── splits/pavement_v2.csv       manifesto da divisão (VERSIONADO: a mesma divisão para todo o grupo)
-│   (splits/pavement_v1.csv é a divisão anterior, com agrupamento e sem as imagens sem rótulo; não é mais usada)
-├── data/                        dataset preparado (gerado; não vai para o git)
-└── results/                     auditoria, execuções, comparações, Optuna e teste final (não vai para o git)
+│   00_check_env.py  01_audit_dataset.py  02_prepare_dataset.py  03_validate_dataset.py
+│   run_experiment.py  tune_optuna.py  compare.py  cv_report.py
+│   evaluate.py  final_test.py  predict.py  train.py (treino avulso)
+├── tests/                       dataset sintético e smoke_test.sh
+├── splits/pavement_v3.csv       manifesto da divisão (VERSIONADO: a mesma divisão para todo o grupo)
+├── data/                        datasets preparados (gerado; fora do git)
+└── results/                     execuções, comparações, Optuna, CV e teste (fora do git)
 ```
 
-### 2.1 Como a configuração é montada
+### 2.1 Como a configuração de cada treino é montada
 
-Cada execução junta as camadas abaixo, nesta ordem. A camada de baixo vence a de cima.
+Cada execução junta as camadas abaixo, nesta ordem (a de baixo vence):
 
 1. `base_train.yaml`
-2. Melhor variante do experimento anterior (`inherit_best`), escolhida pela média da métrica de seleção entre as seeds. Se `inherit_best` tiver uma lista, vale o melhor entre todos os experimentos listados. O E7 e o E8 usam `[05_imbalance, 06b_optuna_confirm]`: se o Optuna não superar o E5, a configuração do E5 é herdada automaticamente.
+2. A melhor configuração entre os experimentos listados em `inherit_best` (maior média de mAP50-95 nos folds). Exemplo: o E4 herda o melhor entre E1, E2 e E3.
 3. `overrides` do experimento
 4. A variante que está sendo testada
 5. `--set chave=valor` na linha de comando
 
-Com isso, cada experimento parte automaticamente do vencedor do anterior, sem copiar valores à mão.
+Com isso, cada experimento parte automaticamente do vencedor dos anteriores.
 
-### 2.2 O que é registrado em cada execução
+### 2.2 Referências sem treinar de novo (`include_best`)
 
-A pasta de cada execução é `results/experiments/<experimento>/<variante>/s<seed>_f<fold>/` e contém:
+A configuração que já venceu não é treinada de novo. A chave `include_best` do YAML traz as execuções dela para a comparação. Exemplo: no E2, o yolo26n do E1 aparece como `yolo26n (E1)`; no E3, o 960 aparece como `imgsz 960 (E1/E2)`.
 
-- os arquivos da Ultralytics: `weights/best.pt` e `last.pt`, `results.csv`, curvas e `args.yaml`;
-- `run_meta.json`, com a configuração completa, o ambiente (versões, GPU, commit do git), o tempo de treino, o pico de memória, as épocas rodadas e a melhor época, parâmetros, GFLOPs, métricas gerais e por classe e o caminho dos pesos;
-- `val_best/`, com a validação do `best.pt`.
+### 2.3 Variantes repetidas (`skip_duplicates`)
 
-Cada execução também acrescenta uma linha a `results/registry.jsonl`. Esse arquivo só cresce, nunca é reescrito.
+Na ablação, uma variante que ficaria igual à `full` é pulada. Exemplo: se o CLAHE não foi adotado, `minus_clahe` é idêntica à `full` e não roda.
 
-Para preservar resultados:
+### 2.4 O que é registrado
 
-- uma execução já concluída é pulada;
-- `--force` roda de novo, mas a pasta antiga é renomeada (`__anterior_<data>`), não apagada;
-- uma execução interrompida é renomeada para `__incompleta_<data>`.
+Cada execução tem a pasta `results/experiments/<experimento>/<variante>/s<seed>_f<fold>/` com os arquivos da Ultralytics (`weights/`, `results.csv`, curvas), o `run_meta.json` (configuração completa, ambiente, tempos, melhor época, métricas gerais e por classe) e `val_best/`. Cada execução também acrescenta uma linha em `results/registry.jsonl`, que só cresce.
+
+Uma execução já concluída é pulada (dá para interromper e continuar). `--force` roda de novo, preservando a pasta antiga.
 
 ---
 
-## 3. Critério geral para avançar
+## 3. Como decidir: comparação pareada por fold
 
-Com uma validação de cerca de 25 imagens, duas execuções idênticas que mudam só a seed dão resultados diferentes. O experimento E1 mede essa variação.
+Com cerca de 30 imagens por fold de validação, um único número engana: na rodada anterior, a mesma configuração variou ±0,015 de mAP50-95 entre seeds, e o Optuna escolhido no fold 0 caiu de 0,22 na validação para 0,09 no teste.
 
-- **Ruído (σ):** o desvio-padrão do mAP50-95 entre as 3 seeds do baseline. O `compare.py` calcula esse valor e o mostra nos gráficos como uma faixa.
-- **Uma mudança é adotada quando** a variante supera a referência por **mais de 1σ** e não piora o F1 de nenhuma classe além de 1σ.
-- **Se a diferença for menor que σ,** as duas opções são consideradas empatadas. Fica a mais simples ou mais barata (modelo menor, imgsz menor, sem oversampling). Para desempatar, rode as duas finalistas com `--seeds 0 1 2` ou `--folds 0 1 2`.
-- **A decisão vale também quando a resposta é "não muda nada".** Esse resultado entra no relatório, como recomenda a aula.
+Por isso, **todas as decisões usam os mesmos 3 folds (0, 1, 2)**, e o `compare.py` compara cada variante com a referência **fold contra o mesmo fold**:
 
-O `compare.py` mostra para cada variante a coluna **"supera ruído"**, com os valores `sim`, `não` ou `pior`. A referência de cada experimento é definida no próprio YAML pela chave `reference` (por exemplo, `yolo26n` no E2 e `imgsz_640` no E3). Quando o YAML não define, a referência é a variante `control`.
+| Veredito | Quando |
+|---|---|
+| **melhor** | ganhou nos 3 folds |
+| **pior** | perdeu nos 3 folds |
+| **empate** | o sinal muda entre os folds: a diferença não é confiável |
+
+A herança (`inherit_best`) usa a maior média. Se o veredito for **empate**, prefira a opção mais simples ou barata (modelo menor, imgsz menor, sem CLAHE) e passe-a com `--set` nos experimentos seguintes. Registre a decisão: "não muda nada" também é resultado.
 
 ---
 
-## 4. Pipeline experimental
+## 4. Pipeline
 
-A ordem vai das decisões que mais mudam o resultado e são mais baratas de testar para os ajustes finos e caros. Os dados vêm primeiro, porque nenhum hiperparâmetro compensa rótulos ruins ou vazamento. A arquitetura e a resolução vêm antes do aumento de dados, porque mudam a escala do problema. O Optuna fica para depois que as decisões de dados estiverem fechadas.
+| # | Etapa | Variantes | Treinos |
+|---|---|---|---|
+| E0 | Ambiente, auditoria, preparo, validação dos dados | — | — |
+| E1 | Baseline | yolo26n, 960, padrões | 3 |
+| E2 | Modelos | yolo26s, yolo11n (yolo26n vem do E1) | 6 |
+| E3 | Resolução | 1280 no melhor modelo (960 vem de antes) | 3 |
+| E4 | CLAHE | clipLimit 1.0 e 2.0 | 6 |
+| E5 | Optuna | hiperparâmetros + aumento de dados + oversampling, fold 0 | 12 trials |
+| E6 | Ablação | full, minus_imgsz, minus_model, minus_clahe (só as adotadas); "sem Optuna" vem do E1–E4 | 3 a 12 |
+| E7 | Validação cruzada | vencedora nos folds 3 e 4 (0–2 já existem) | 2 |
+| E8 | Final + teste | treino+validação, épocas da CV, 3 seeds; teste uma vez | 3 |
 
-### Etapa 0 — Ambiente
+Cerca de **38 a 47 treinos**. Depois de cada experimento: `python scripts/compare.py --experiments <nome>`.
 
-- **Objetivo:** garantir que o treino roda e saber onde roda.
-- **Script:** `scripts/00_check_env.py`
-- **Critério para avançar:** nenhuma linha marcada como `FALTA`, e `device` aparece como `0` (CUDA) ou `mps`. Treinar na CPU é possível, mas muito lento.
+### E0 — Ambiente e dados
 
 ```bash
-cd "<caminho>/computer-vision/detection"
-python3 -m venv ~/yolo-env
-source ~/yolo-env/bin/activate
+cd detection
 pip install -r requirements.txt
-python scripts/00_check_env.py --smoke
-```
-
-O que cada linha faz:
-
-- `cd ...`: entra na pasta do projeto. Troque `<caminho>` pelo caminho da sua máquina.
-- `python3 -m venv ~/yolo-env`: cria o ambiente virtual. Só é necessário uma vez (manual, seção 1).
-- `source ~/yolo-env/bin/activate`: ativa o ambiente. Repita sempre que abrir um terminal novo.
-- `pip install -r requirements.txt`: instala as bibliotecas da lista.
-- `python scripts/00_check_env.py --smoke`: mostra as versões e o device, e treina 1 época no COCO8 (o teste rápido do manual).
-
-### Etapa 1 — Auditoria do dataset
-
-- **Objetivo:** conhecer o dataset e achar problemas antes de treinar.
-- **Script:** `scripts/01_audit_dataset.py`. Só lê os dados e não altera nada no dataset.
-- **Resultado:** `results/audit/` (relatório, CSVs, gráficos, recortes por classe e anotador, overlays, quase-duplicatas e imagens sem rótulo).
-- **Critério para avançar:** o relatório não mostra problemas novos além dos da seção 1.4.
-
-```bash
-python scripts/01_audit_dataset.py
-```
-
-Esse comando gera o relatório em `results/audit/report.md`.
-
-### Etapa 2 — Preparação e divisão
-
-- **Objetivo:** gerar uma cópia limpa no formato YOLO e a divisão em treino, validação e teste.
-- **Script:** `scripts/02_prepare_dataset.py`
-- **O que o script faz:**
-  - aplica a orientação EXIF;
-  - converte HEIC para JPEG;
-  - reduz as imagens para no máximo 2048 px (os rótulos normalizados não mudam);
-  - remove caixas inválidas;
-  - separa um **teste fixo de 15%** e divide o resto em **5 folds**, por imagem (agrupamento desligado, seção 1.4) e estratificando por classe e por anotador. As imagens sem `.txt` entram como imagens sem objetos. A validação padrão é o fold 0, com cerca de 17% das imagens.
-- **Arquivos gerados:** `data/pavement_v2/` (imagens, rótulos, listas, `data_fold0.yaml` a `data_fold4.yaml`, `data_trainval.yaml` e `split_report.md`) e `splits/pavement_v2.csv`.
-- **Por que o manifesto vai para o git:** quem rodar o preparo depois recebe exatamente a mesma divisão. Se o dataset mudar (reanotação, imagens novas), o script recusa reaproveitar o manifesto. Nesse caso, crie uma versão nova com `--resplit --name pavement_v2`, para não misturar resultados de divisões diferentes.
-
-```bash
-python scripts/02_prepare_dataset.py
-python scripts/02_prepare_dataset.py --preprocess clahe
-```
-
-O que cada linha faz:
-
-- A primeira linha cria `data/pavement_v2` e o manifesto da divisão.
-- A segunda cria `data/pavement_v2_clahe`, com CLAHE aplicado e a mesma divisão. Ela só é necessária para a variante `clahe` do E4.
-
-**Critério para avançar:** em `split_report.md`, cada partição tem as 3 classes e a linha "Grupos que atravessam partições" mostra 0.
-
-### Etapa 3 — Validação do dataset preparado
-
-- **Objetivo:** encontrar erros de dados antes de gastar GPU.
-- **Script:** `scripts/03_validate_dataset.py`
-- **O que confere:** arquivos existentes, formato dos rótulos, classes presentes em treino e validação, nenhuma imagem ou grupo em duas partições, nenhuma cópia idêntica (md5) entre partições e leitura pela Ultralytics.
-- **Critério para avançar:** o script termina com `0 erros`.
-
-```bash
+python scripts/00_check_env.py --smoke                 # versões, device e 1 época no COCO8
+bash tests/smoke_test.sh --quick                       # confere preparo e dry-runs (sem treinos)
+python scripts/01_audit_dataset.py                     # auditoria da nova rotulação: results/audit/
+python scripts/02_prepare_dataset.py --resplit         # divisão nova → splits/pavement_v3.csv
+python scripts/02_prepare_dataset.py --preprocess clahe --clahe-clip 1.0   # → data/pavement_v3_clahe1
+python scripts/02_prepare_dataset.py --preprocess clahe --clahe-clip 2.0   # → data/pavement_v3_clahe2
 python scripts/03_validate_dataset.py --ultralytics
-python scripts/03_validate_dataset.py --name pavement_v2_clahe
 ```
 
-A primeira linha confere `pavement_v2` e testa se a Ultralytics consegue ler o dataset. A segunda confere a versão com CLAHE.
+Confira na auditoria: nenhuma imagem com dano ficou sem `.txt`, o número de caixas de rachadura por imagem ficou parecido entre anotadores e o `split_report.md` mostra **0 grupos atravessando partições**. Depois, versione o `splits/pavement_v3.csv` no git, para todos usarem a mesma divisão.
 
-### Etapa 4 — E1: linha de base
+### E1 — Baseline
 
 | | |
 |---|---|
-| Objetivo | Ponto de partida e medida do ruído (σ) |
-| Configuração | YOLO26n, `imgsz=640`, padrões da Ultralytics, seeds 0, 1 e 2 |
-| Arquivo | `configs/experiments/01_baseline.yaml` |
-| Resultado esperado | Um mAP50-95 de referência e o σ entre seeds. Remendo deve ser a classe com pior AP e F1. |
-| Critério para avançar | As 3 execuções terminam. Se σ for muito alto, considere usar folds nas comparações apertadas. |
+| Configuração | `yolo26n.pt`, `imgsz 960`, padrões da Ultralytics, `epochs 100`, `patience 25`, `batch 8` |
+| Por quê | Ponto de partida e referência dos experimentos seguintes. O 960 já se mostrou melhor que 640 na rodada anterior. |
 
 ```bash
 python scripts/run_experiment.py 01_baseline
-python scripts/compare.py --experiments 01_baseline
 ```
 
-A primeira linha treina as 3 seeds. A segunda gera a tabela e os gráficos em `results/comparisons/01_baseline/`.
-
-### Etapa 5 — E2: versões e tamanhos da YOLO
+### E2 — Modelos
 
 | | |
 |---|---|
-| Objetivo | Escolher a família (YOLOv8, YOLO11 ou YOLO26) e o tamanho (n ou s) |
-| Variantes | `yolov8n`, `yolov8s`, `yolo11n`, `yolo11s`, `yolo26n`, `yolo26s`. Opcionais: `yolo11m` e `yolo26m` |
-| Justificativa | Com cerca de 100 imagens, modelos grandes tendem a decorar o treino. Os tamanhos m só valem a pena se s ganhar de n por mais de σ, o que indicaria que capacidade ajuda. |
-| Resultado esperado | Diferenças pequenas entre famílias. O tamanho s deve ganhar um pouco de n, com custo maior. |
-| Critério para avançar | Fica a variante de maior mAP50-95. Se a diferença for menor que σ, fica a mais leve (veja o `tradeoff_inference.png`). |
+| Variantes | `yolo26s`, `yolo11n` (o `yolo26n` entra como referência, vindo do E1) |
+| Por quê | Um modelo maior (s) e outra geração (11n). Modelos m/l ficam de fora: com ~120 imagens de treino tendem a decorar o treino. |
 
 ```bash
-python scripts/run_experiment.py 02_models --variants yolov8n yolov8s yolo11n yolo11s yolo26n yolo26s
+python scripts/run_experiment.py 02_models
 python scripts/compare.py --experiments 02_models
 ```
 
-A primeira linha roda as 6 variantes principais, sem as opcionais m. A segunda compara as variantes, incluindo tempo de treino e de inferência.
-
-### Etapa 6 — E3: resolução de entrada (imgsz)
+### E3 — Resolução
 
 | | |
 |---|---|
-| Objetivo | Verificar se uma resolução maior ajuda a achar rachaduras finas e buracos pequenos |
-| Variantes | 640, 960 e 1280. O batch diminui junto: 16, 8 e 4. |
-| Herança | Usa o melhor modelo do E2 |
-| Justificativa | As fotos vão até 16 MP, e as rachaduras têm poucos pixels de largura. O custo cresce com o quadrado do imgsz. |
-| Resultado esperado | Ganho de 640 para 960, especialmente em rachadura. De 960 para 1280 o ganho tende a ser menor. |
-| Critério para avançar | Fica o menor imgsz que estiver a menos de σ do melhor. Confira se a memória e o tempo cabem no hardware. |
+| Variante | `imgsz_1280` no melhor modelo do E1/E2 (o 960 entra como referência) |
+| Por quê | Rachaduras são finas e somem em resoluções menores. Foi o único ganho consistente da rodada anterior (640 → 960). |
+| Observação | Se o E2 der empate entre dois modelos, rode também o 1280 no outro: `--set model=<modelo>.pt` |
 
 ```bash
 python scripts/run_experiment.py 03_imgsz
 python scripts/compare.py --experiments 03_imgsz
 ```
 
-### Etapa 7 — E4: aumento de dados e pré-processamento
+### E4 — CLAHE
 
 | | |
 |---|---|
-| Objetivo | Medir cada técnica isoladamente contra o controle |
-| Variantes | `control`, `no_aug` (mostra quanto o aumento padrão já ajuda), `rotate_5`, `light_strong`, `scale_strong`, `perspective`, `mixup_01`, `close_mosaic_20`, `clahe` |
-| Justificativa | Cada técnica corresponde a uma variação que acontece no uso: celular inclinado, sombra e sol, distância, ângulo. O `flipud` ficou de fora porque não é realista. O aumento de dados acontece só no treino e é aplicado online pela Ultralytics. |
-| Resultado esperado | `no_aug` deve piorar, confirmando que o aumento padrão ajuda. Os ganhos das outras variantes tendem a ser pequenos. |
-| Critério para avançar | Fica a melhor variante. As técnicas que superam o ruído são anotadas, porque orientam a faixa do espaço de busca do Optuna. |
+| Variantes | `clahe1` (clipLimit 1.0) e `clahe2` (clipLimit 2.0); "sem CLAHE" entra como referência |
+| Por quê | Realça contraste local (sombra, sol forte). É pré-processamento: aplicado igual no treino, validação, teste e uso (`predict.py` reaplica sozinho). |
 
 ```bash
-python scripts/run_experiment.py 04_augmentation
-python scripts/compare.py --experiments 04_augmentation
+python scripts/run_experiment.py 04_clahe
+python scripts/compare.py --experiments 04_clahe
 ```
 
-Se o CLAHE for adotado, ele é reaplicado automaticamente no `predict.py`, porque fica registrado no `dataset_info.json`.
-
-### Etapa 8 — E5: desbalanceamento
+### E5 — Optuna (hiperparâmetros e aumento de dados)
 
 | | |
 |---|---|
-| Objetivo | Melhorar a classe remendo sem piorar a média |
-| Variantes | `control`, `rfs_t05` e `rfs_t10` (Repeat Factor Sampling), `patch_x2` e `patch_x3` (repetição fixa das imagens com remendo), `cls_gain_1` (peso maior na perda de classe) |
-| Justificativa | O oversampling age só na lista de treino. A validação e o teste continuam com as imagens originais. A classe remendo está em cerca de 35% das imagens: com limiar 0,5 do RFS as imagens com remendo entram cerca de 1,2 vez por época; com 1,0, cerca de 1,7 vez. Um limiar abaixo de 0,35 não repetiria nada. |
-| Resultado esperado | O AP e o F1 de remendo sobem. Com repetição demais, o modelo pode decorar as mesmas imagens. |
-| Critério para avançar | `F1__remendo` e `mAP50_95__remendo` sobem por mais de σ e a média não cai por mais de σ. Confira as colunas por classe no `compare.py`. |
-
-```bash
-python scripts/run_experiment.py 05_imbalance
-python scripts/compare.py --experiments 05_imbalance
-```
-
-### Etapa 9 — E6: otimização de hiperparâmetros com Optuna
-
-| | |
-|---|---|
-| Objetivo | Ajustar otimizador, taxa de aprendizado, pesos da perda e intensidade do aumento |
-| Base | A melhor configuração do E5 (modelo, imgsz, aumento e desbalanceamento já decididos) |
-| Configuração | `configs/optuna.yaml`: 40 trials TPE, poda pela mediana, trials de 80 épocas, objetivo na validação (fold 0) |
-| Espaço de busca | `optimizer`, `lr0`, `lrf`, `momentum`, `weight_decay`, `warmup_epochs`, `cos_lr`, `box`, `cls`, `scale`, `mosaic`, `hsv_v`, `degrees`, `close_mosaic` |
-| Justificativa | O TPE explora melhor que uma busca em grade. A poda interrompe cedo os trials ruins e economiza tempo. O estudo fica salvo em SQLite e pode ser retomado depois de uma interrupção. Trials curtos são ruidosos, por isso as 3 melhores configurações são treinadas de novo por completo, com 2 seeds (E6b). |
-| Resultado esperado | Ganho pequeno sobre o E5. O relatório mostra a importância de cada hiperparâmetro. |
-| Critério para avançar | O E7 e o E8 herdam sozinhos a configuração de maior média entre o E5 e o E6b. Se o E6b ganhar por menos de σ, é empate: o grupo pode preferir os padrões, mais simples, e para isso basta tirar o `06b_optuna_confirm` da lista `inherit_best` do `07_ablation.yaml` e do `08_final.yaml`. Relate o resultado do Optuna em qualquer caso. |
+| Base | O melhor entre E1–E4 |
+| Espaço de busca | otimizador, lr0, box, cls; scale, mosaic, close_mosaic, translate, hsv_v, degrees, mixup; oversampling do remendo (×1, ×2, ×3) |
+| Configuração | 12 trials, 50 épocas e paciência 15 por trial, poda pela mediana, só no fold 0 |
+| Por quê | Substitui os experimentos manuais de aumento de dados e desbalanceamento. O espaço foi reduzido aos parâmetros que pesaram na rodada anterior (cls, lr0, close_mosaic, hsv_v, mosaic, degrees) mais os que faltavam testar. |
 
 ```bash
 python scripts/tune_optuna.py
-python scripts/tune_optuna.py --report
-python scripts/tune_optuna.py --confirm-top 3 --seeds 0 1
-python scripts/compare.py --experiments 05_imbalance 06b_optuna_confirm
+python scripts/tune_optuna.py --report        # importâncias e histórico em results/optuna/hparams_v3/
 ```
 
-O que cada linha faz:
+O melhor trial **não é adotado direto**: ele foi escolhido olhando só o fold 0, com treinos curtos. Quem decide é a ablação.
 
-1. Roda ou continua o estudo. `--n-trials 10` roda mais 10 trials.
-2. Gera o histórico, a importância dos hiperparâmetros e `best_params.yaml` em `results/optuna/hparams_v1/`.
-3. Treina por completo as 3 melhores configurações, com seeds 0 e 1, como experimento `06b_optuna_confirm`.
-4. Compara as confirmadas com o vencedor do E5.
-
-### Etapa 10 — E7: ablação
+### E6 — Ablação
 
 | | |
 |---|---|
-| Objetivo | Medir quanto cada decisão contribui, removendo uma de cada vez da configuração final |
-| Variantes | `full`, `minus_optuna_hparams`, `minus_augmentation`, `minus_oversampling`, `minus_preprocessing`, `minus_imgsz`, `minus_model` |
-| Configuração | 3 seeds, porque as diferenças aqui são pequenas |
-| Observação | Rode só as variantes de componentes que foram adotados. Se o oversampling perdeu no E5, `minus_oversampling` fica igual a `full`. |
-| Resultado esperado | Uma tabela que mostra qual decisão mais pesa. Em geral são o imgsz e o modelo. |
-| Critério para avançar | A tabela entra no relatório. Se algum componente não fizer falta (diferença menor que σ), remova-o para simplificar e rode o E8 sem ele. |
+| Variantes | `full` (melhor trial do Optuna, com 100 épocas, folds 0–2), `minus_imgsz`, `minus_model`, `minus_clahe`. A configuração **sem Optuna** entra como referência, vinda do E1–E4. |
+| Variantes puladas | As que ficariam iguais à `full` (componente não adotado) |
+| Por quê | Mostra quanto cada decisão contribui e confirma se o Optuna ajudou em folds que ele não viu. Se `full` não superar a "sem Optuna", o E7 e o E8 herdam automaticamente a sem Optuna. |
 
 ```bash
-python scripts/run_experiment.py 07_ablation --variants full minus_imgsz minus_model minus_augmentation
-python scripts/compare.py --experiments 07_ablation
+python scripts/run_experiment.py 06_ablation
+python scripts/compare.py --experiments 06_ablation
 ```
 
-Ajuste a lista de `--variants` para os componentes que foram adotados.
-
-### Etapa 11 — E8: treino definitivo
+### E7 — Validação cruzada
 
 | | |
 |---|---|
-| Objetivo | Treinar o modelo final com a configuração vencedora |
-| Configuração | `epochs=300`, `patience=50`, 3 seeds |
-| Justificativa | Mais épocas e o early stopping decidindo onde parar. As 3 seeds permitem relatar média ± desvio, em vez de um único número que pode ter sido sorte. |
-| Opcional | A variante `final_trainval` treina em treino e validação juntos, com o número de épocas fixo (mediana das `best_epoch`). Usa um pouco mais de dados, mas fica sem validação independente. Só use se o grupo concordar. |
-| Critério para avançar | As 3 execuções terminam, com métricas de validação próximas às do E6b ou E7 `full`. |
+| O que faz | Treina a configuração vencedora (o melhor entre E1, E2, E3, E4 e E6) nos folds 3 e 4. O `cv_report.py` junta com os folds 0–2 já treinados. |
+| Saídas | `results/cv/cv_report.md`: mAP50-95, mAP50, P, R, F1 em **média ± desvio de 5 folds** (o número principal do relatório), por classe; a mediana da melhor época (usada no E8) e o limiar de confiança que maximiza o F1. |
+
+```bash
+python scripts/run_experiment.py 07_cv
+python scripts/cv_report.py
+```
+
+### E8 — Treino definitivo e teste
+
+| | |
+|---|---|
+| Configuração | A vencedora, treinada em **treino + validação** (todas as imagens menos o teste), com o número de épocas fixo na mediana da melhor época da CV e sem early stopping. 3 seeds. |
+| Por quê | Cerca de 20% a mais de dados, o que pesa num dataset deste tamanho. O número de épocas vem da CV porque não sobra validação independente. Vale o modelo da última época (`last.pt`). |
+| Teste | Usado **uma vez**. Resultado = média ± desvio das 3 seeds. O limiar do ponto de operação vem da CV (`--conf cv`), não do teste. |
 
 ```bash
 python scripts/run_experiment.py 08_final
-python scripts/evaluate.py --best-of 08_final
+python scripts/final_test.py --experiment 08_final --confirm --conf cv
 ```
 
-A primeira linha treina as 3 seeds. A segunda faz a avaliação detalhada na validação: matrizes de confusão, curvas, métricas por classe, piores imagens e tempo de inferência.
-
-### Etapa 12 — Avaliação final no teste (uma vez)
-
-- **Objetivo:** obter a nota honesta do modelo.
-- **Script:** `scripts/final_test.py`
-- **O que faz:** avalia **todas** as seeds do E8 no teste e relata média ± desvio. O modelo a entregar é o de melhor resultado na **validação**. Escolher pelo teste seria vazamento.
-- **Trava:** a primeira execução grava `results/final/TEST_LOCK.json`. Rodar de novo exige `--rerun`, e isso fica registrado no relatório.
-- **Saída:** `results/final/08_final_<data>/test_report.md`, `test_runs.csv`, a pasta de cada seed com as matrizes de confusão (contagens e normalizada), as curvas PR, F1, P e R, as métricas por classe, as piores imagens e o tempo de inferência.
-
-```bash
-python scripts/final_test.py --experiment 08_final --confirm
-```
-
-O `--confirm` é obrigatório. Ele confirma que todas as decisões já foram tomadas.
+O `final_test.py` grava `results/final/TEST_LOCK.json` e recusa rodar de novo sem `--rerun` (que fica registrado no relatório). O modelo entregue é o da seed 0, com o caminho no `test_report.md`.
 
 ### Uso do modelo em imagens novas
 
 ```bash
-python scripts/predict.py --run results/experiments/08_final/final/s0_f0 --source pasta_de_fotos --conf 0.25
+python scripts/predict.py --run results/experiments/08_final/final_trainval/s0_ftrainval --source pasta_ou_imagem --conf <limiar da CV>
 ```
 
-Esse comando aplica o mesmo preparo usado no treino (EXIF, HEIC e CLAHE, se foi adotado) e salva as imagens com as caixas em `results/predictions/`. Troque `s0_f0` pela seed indicada no `test_report.md`.
-
 ---
 
-## 5. Métricas e saídas da avaliação
+## 5. Métricas
 
-| Métrica | Onde aparece | Observação |
-|---|---|---|
-| Precision, Recall, F1 (geral e por classe) | `run_meta.json`, `per_class.csv`, `compare.py` | Calculadas no limiar de confiança que maximiza o F1 médio (`best_conf`), o mesmo que a Ultralytics imprime |
-| `P_op`, `R_op`, `F1_op` (por classe e micro) | Mesmos arquivos | Calculadas num **limiar fixo** (`op_conf: 0.25`, configurável), a partir de uma matriz de confusão própria. Mostram o que o usuário vê no `predict`. |
-| mAP50 e mAP50-95 | Todos | Não dependem de limiar. O mAP50-95 é a métrica de seleção. |
-| Matriz de confusão | `confusion_matrix_conf0.25*.png` | Com a linha e a coluna "fundo": objeto não encontrado (FN) e objeto inventado (FP) |
-| Curvas PR, F1, P e R | `ultralytics/` dentro de cada avaliação | Geradas pela Ultralytics |
-| Gráficos comparativos | `results/comparisons/<nome>/` | Barras com desvio e faixa de ruído, F1 por classe, métrica × inferência e métrica × tempo de treino |
-| Análise de erros | `per_image.csv`, `worst_images/` | Caixas reais em verde e previstas em vermelho |
-| Custo computacional | `run_meta.json`, `metrics.json` | Tempo de treino, épocas, pico de memória da GPU e da RAM, parâmetros, GFLOPs, tamanho do `.pt`, ms por imagem (média, p50, p95) e FPS |
-
-Os tempos dependem do hardware. Compare só execuções feitas na mesma máquina. O `device` fica registrado em cada execução.
-
----
-
-## 6. Ordem de execução resumida
-
-| # | Etapa | Comando principal | Execuções |
-|---|---|---|---|
-| 0 | Ambiente | `00_check_env.py --smoke` | — |
-| 1 | Auditoria | `01_audit_dataset.py` | — |
-| 2 | Preparo | `02_prepare_dataset.py` (+ `--preprocess clahe`) | — |
-| 3 | Validação dos dados | `03_validate_dataset.py --ultralytics` | — |
-| 4 | E1 baseline | `run_experiment.py 01_baseline` | 3 |
-| 5 | E2 modelos | `run_experiment.py 02_models` | 6 (+2) |
-| 6 | E3 imgsz | `run_experiment.py 03_imgsz` | 3 |
-| 7 | E4 aumento | `run_experiment.py 04_augmentation` | 9 |
-| 8 | E5 desbalanceamento | `run_experiment.py 05_imbalance` | 6 |
-| 9 | E6 Optuna + E6b | `tune_optuna.py` e depois `--confirm-top 3` | 40 trials (curtos, com poda) + 6 |
-| 10 | E7 ablação | `run_experiment.py 07_ablation` | até 21 |
-| 11 | E8 final | `run_experiment.py 08_final` | 3 |
-| 12 | Teste | `final_test.py --confirm` | uma vez |
-
-Depois de cada experimento, rode `python scripts/compare.py --experiments <nome>` e aplique o critério da seção 3.
-
-### Versão enxuta, se o tempo de GPU for curto
-
-- E2 só com `yolo11n`, `yolo26n` e `yolo26s`.
-- E3 só com 640 e 960.
-- E4 só com `control`, `no_aug`, `light_strong` e `scale_strong`.
-- E5 só com `control`, `rfs_t05` e `patch_x2`.
-- Optuna com `--n-trials 15`.
-- E7 só com `full`, `minus_imgsz` e `minus_model`.
-
-Para isso, use `--variants` e `--seeds`.
-
----
-
-## 7. Comandos úteis
-
-| Comando | O que faz |
+| Métrica | Uso |
 |---|---|
-| `python scripts/run_experiment.py --list` | Lista os experimentos e quantas variantes cada um tem |
-| `python scripts/run_experiment.py 02_models --dry-run` | Mostra a configuração final de cada variante, sem treinar |
-| `python scripts/run_experiment.py 03_imgsz --seeds 0 1 2` | Repete com mais seeds, para desempatar |
-| `python scripts/run_experiment.py 02_models --folds 0 1 2` | Valida em outros folds (validação cruzada) |
-| `python scripts/run_experiment.py 02_models --set device=mps train.batch=8` | Muda a configuração na hora |
+| **mAP50-95** | Métrica de seleção. Média do AP em IoU de 0,50 a 0,95: cobra caixas precisas. |
+| mAP50 | AP com IoU ≥ 0,5: o modelo achou o dano mais ou menos no lugar certo |
+| P, R, F1 | No limiar que maximiza o F1 (`best_conf`) |
+| P_op, R_op, F1_op | No limiar fixo do ponto de operação, com matriz de confusão própria. É o que o usuário vê com `predict`. |
+| Por classe | Todas as anteriores por classe. Rachadura costuma ser a mais baixa (extensão da caixa ambígua). |
+
+Referência: em datasets públicos grandes de pavimento (milhares de imagens), modelos bem treinados ficam em torno de 0,5–0,65 de mAP50. Para cerca de 170 imagens bem anotadas, 0,35–0,45 de mAP50 no teste seria um bom resultado.
+
+---
+
+## 6. Tempo: caber em 5 horas
+
+### 6.1 Já configurado
+
+| Ajuste | Onde | Efeito |
+|---|---|---|
+| `cache: disk` | `base_train.yaml` | Guarda as imagens decodificadas: a CPU não redecodifica o JPEG a cada época. Na rodada anterior a GPU usava 2,4 de 50 GB; o gargalo era a CPU. |
+| `max_side: 1280` | `dataset.yaml` | Imagens menores, leitura mais rápida, sem perda (o maior imgsz é 1280) |
+| `workers: 6` | `base_train.yaml` | Usa todos os vCPUs |
+| `epochs 100`, `patience 25` | `base_train.yaml` | O early stopping corta o desnecessário |
+| Optuna: 12 trials de 50 épocas, poda | `optuna.yaml` | |
+| Referências reaproveitadas, ablação pula variantes repetidas, CV só treina 2 folds | YAMLs | Nenhum treino repetido |
+
+### 6.2 Estimativa (tempos da rodada anterior)
+
+| Etapa | Treinos | Tempo |
+|---|---|---|
+| E1 | 3 | 15 min |
+| E2 | 6 | 35 min |
+| E3 | 3 | 30 min |
+| E4 | 6 | 35–55 min |
+| E5 | 12 | 50 min |
+| E6 | 3–12 | 20–80 min |
+| E7 | 2 | 15 min |
+| E8 + teste | 3 | 20–30 min |
+| Comparações e relatórios | — | 20 min |
+| **Total** | **~38–47** | **~4h–5h30** |
+
+O tempo maior vale se o 1280 vencer (as etapas seguintes ficam mais lentas). Com o cache, deve sobrar folga. Rode um treino curto antes (`python scripts/train.py --name teste --set train.epochs=10`) para medir o tempo por época na máquina.
+
+### 6.3 Dois treinos ao mesmo tempo (opcional)
+
+A GPU comporta dois treinos. Em dois terminais:
+
+```bash
+python scripts/run_experiment.py 02_models --variants yolo26s
+python scripts/run_experiment.py 02_models --variants yolo11n
+```
+
+O mesmo vale para `04_clahe` (`clahe1` e `clahe2`) e para o Optuna (o mesmo comando em dois terminais divide os trials). Com só 6 vCPUs o ganho é limitado; teste antes.
+
+### 6.4 Se estourar o tempo, corte nesta ordem
+
+1. Optuna de 12 para 8 trials: `python scripts/tune_optuna.py --n-trials 8`
+2. Ablação só com `full` e `minus_imgsz`: `--variants full minus_imgsz`
+3. Final com 1 seed: `python scripts/run_experiment.py 08_final --seeds 0` (o teste fica sem desvio)
+
+Não corte os 3 folds do E1 ao E4: é o que garante que as escolhas não são sorte.
+
+---
+
+## 7. Ordem resumida
+
+| # | Comando |
+|---|---|
+| E0 | `00_check_env.py --smoke` → `01_audit_dataset.py` → `02_prepare_dataset.py --resplit` → `02_prepare_dataset.py --preprocess clahe --clahe-clip 1.0` e `2.0` → `03_validate_dataset.py --ultralytics` |
+| E1 | `run_experiment.py 01_baseline` |
+| E2 | `run_experiment.py 02_models` → `compare.py --experiments 02_models` |
+| E3 | `run_experiment.py 03_imgsz` → `compare.py --experiments 03_imgsz` |
+| E4 | `run_experiment.py 04_clahe` → `compare.py --experiments 04_clahe` |
+| E5 | `tune_optuna.py` → `tune_optuna.py --report` |
+| E6 | `run_experiment.py 06_ablation` → `compare.py --experiments 06_ablation` |
+| E7 | `run_experiment.py 07_cv` → `cv_report.py` |
+| E8 | `run_experiment.py 08_final` → `final_test.py --experiment 08_final --confirm --conf cv` |
+| Relatório | `compare.py --experiments 01_baseline 02_models 03_imgsz 04_clahe 06_ablation --out resumo` |
+
+---
+
+## 8. Comandos úteis
+
+| Comando | Para quê |
+|---|---|
+| `python scripts/run_experiment.py --list` | Lista os experimentos |
+| `python scripts/run_experiment.py 03_imgsz --dry-run` | Mostra a configuração herdada sem treinar |
+| `python scripts/run_experiment.py 02_models --variants yolo26s` | Só uma variante |
+| `python scripts/run_experiment.py 04_clahe --set train.batch=4` | Muda um valor em todas as variantes |
 | `python scripts/train.py --name teste --set train.epochs=10` | Treino avulso, também registrado |
-| `python scripts/evaluate.py --run <pasta da execução>` | Avalia uma execução específica na validação |
+| `python scripts/evaluate.py --best-of 06_ablation` | Avaliação detalhada na validação: matrizes, curvas, piores imagens, velocidade |
+| `bash tests/smoke_test.sh` | Teste do pipeline inteiro num dataset sintético, na CPU (sem tocar em `data/` e `results/`) |
 
 O `evaluate.py` recusa o teste. O teste só é usado pelo `final_test.py`.
 
 ---
 
-## 8. O que foi testado
+## 9. Limitações a relatar
 
-| Teste | Situação |
-|---|---|
-| Auditoria no dataset real | Rodada (só leitura). Resultados na seção 1.3. |
-| Preparo, validação e treinos com o dataset real | **Não rodados** |
-| Teste de ponta a ponta (`tests/smoke_test.sh`) com dataset sintético, na nuvem e na CPU, com 2 épocas | Passaram: ambiente, auditoria, preparo (com reuso do manifesto e CLAHE), validação (incluindo a leitura pela Ultralytics), dry-runs, E1 (3 seeds e pulo das concluídas), E2, E3 com herança, E4 com CLAHE, E5 com oversampling e o primeiro trial do Optuna |
-| Resto do teste sintético: poda do Optuna, `--confirm-top`, E7, E8, `compare.py`, `evaluate.py`, `final_test.py`, `predict.py` | **Não chegaram a rodar**: o teste foi interrompido |
-
-Depois do teste, todos os arquivos passaram por uma revisão de código completa (leitura, sem executar). A revisão corrigiu a herança depois do Optuna, a referência das comparações, uma variante de oversampling que não tinha efeito, o dry-run do Optuna e o formato das listas de imagens: as entradas `./../images/...` dependiam de um detalhe de versão da Ultralytics e passaram a ser `./images/...`, com as listas na raiz do dataset preparado.
-
-Para rodar o teste sintético completo na sua máquina antes do primeiro treino real:
-
-```bash
-bash tests/smoke_test.sh
-```
-
-Esse comando roda o pipeline inteiro com dados falsos, numa pasta temporária. Não toca em `data/`, `results/` nem `splits/`. Use `--quick` para pular os treinos.
+- **Dataset pequeno:** cerca de 170 imagens. Os folds têm ~30 imagens e o teste ~25; as métricas variam bastante, por isso a comparação pareada e a CV de 5 folds.
+- **Fold 0 usado pelo Optuna:** a ablação treina nos folds 0–2, então a `full` tem uma pequena vantagem no fold 0. Os folds 3 e 4 da CV não participaram de nenhuma escolha.
+- **Rachadura:** mesmo com o guia, a extensão de uma rachadura é ambígua; espera-se mAP50-95 mais baixo nessa classe.
+- **Agrupamento por cena:** depende de EXIF (data e câmera) e da numeração das fotos. Fotos sem EXIF podem escapar do agrupamento; confira o `split_report.md`.
 
 ---
 
-## 9. Limitações conhecidas do dataset
-
-O grupo decidiu usar o dataset como está: sem reanotar, com as imagens sem anotação incluídas e com a divisão feita por imagem. Isso traz três limitações, que devem constar no relatório.
-
-- **Imagens sem anotação usadas como fundo.** As 32 imagens sem `.txt` entram no treino, na validação e no teste como imagens sem nenhum dano. Várias delas mostram buracos e rachaduras. No treino, isso ensina o modelo a não marcar esses danos. Na avaliação, um dano encontrado numa dessas imagens conta como falso positivo.
-- **Divisão por imagem, sem agrupar a mesma cena.** Há fotos do mesmo dano tiradas com segundos de diferença, muitas vezes anotadas por pessoas diferentes. Com a divisão por imagem, fotos da mesma cena podem ficar uma no treino e outra na validação ou no teste. Nesse caso, a validação e o teste avaliam o modelo em cenas que ele já viu no treino, e as métricas tendem a ficar acima do desempenho em fotos de ruas novas.
-- **Critério de anotação diferente entre anotadores.** Há tampas de bueiro e meio-fio pintado anotados como remendo, e faixa pintada e desgaste da superfície anotados como rachadura. Algumas rachaduras têm uma caixa para a rua inteira, outras uma caixa por trecho. O modelo aprende exemplos contraditórios, e a avaliação compara as previsões com rótulos inconsistentes. O esperado é que remendo e rachadura tenham métricas mais baixas e mais instáveis entre seeds. A pasta `results/audit/crops/` mostra exemplos por classe e por anotador.
-
-Para voltar atrás em qualquer uma das duas primeiras decisões, basta mudar `unlabeled_policy` ou os valores de `grouping` em `configs/dataset.yaml` e preparar uma versão nova do dataset com outro `prepare.name`.
-
 ## 10. Pendências antes do primeiro treino
 
-1. Combinar com o grupo onde os treinos vão rodar e manter a mesma máquina e as mesmas versões em todos os experimentos.
-2. Quem for treinar: rodar `bash tests/smoke_test.sh` uma vez antes dos experimentos reais (seção 8).
+1. Terminar a nova rotulação seguindo a seção 1.1.
+2. Apagar os YAMLs da rodada anterior que não fazem mais parte do pipeline: `configs/experiments/04_augmentation.yaml`, `05_imbalance.yaml`, `06b_optuna_confirm.yaml` e `07_ablation.yaml` (`git rm`).
+3. Apagar ou mover a pasta `results/` antiga da máquina de treino, se existir.
+4. Manter a mesma máquina e as mesmas versões em todos os experimentos.
+5. Rodar `bash tests/smoke_test.sh --quick` uma vez na máquina de treino.

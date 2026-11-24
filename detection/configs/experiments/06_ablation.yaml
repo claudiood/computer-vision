@@ -1,0 +1,32 @@
+# E6 — Ablação: parte da configuração final (melhor trial do Optuna, E5) e REMOVE
+# um componente por vez, para medir quanto cada decisão contribui.
+#
+# - full: a melhor configuração do Optuna, agora com o número normal de épocas,
+#   nos folds 0-2 (o Optuna só olhou o fold 0 e trials curtos).
+# - sem Optuna: a melhor configuração do E1–E4, já treinada (include_best).
+#   Se `full` não superar a `sem Optuna` de forma consistente, fica a sem Optuna:
+#   o E7 e o E8 herdam automaticamente o melhor entre todos.
+# - minus_*: só fazem sentido se o componente foi adotado. Uma variante que
+#   ficaria IGUAL à `full` (ex.: minus_clahe quando o CLAHE não foi adotado) é
+#   pulada automaticamente (skip_duplicates).
+extends: ../base_train.yaml
+name: 06_ablation
+description: config do Optuna menos um componente por vez, folds 0-2
+inherit_best: 05_optuna
+folds: [0, 1, 2]
+seeds: [0]
+skip_duplicates: true
+# volta ao treino normal (os trials do Optuna foram mais curtos)
+overrides:
+  train: {epochs: 100, patience: 25, plots: true}
+include_best:
+  sem Optuna (E1-E4): [01_baseline, 02_models, 03_imgsz, 04_clahe]
+reference: full
+variants:
+  full: {}
+  minus_imgsz:                        # volta à resolução da linha de base
+    train: {imgsz: 960}
+  minus_model:                        # volta ao modelo da linha de base
+    model: yolo26n.pt
+  minus_clahe:                        # volta ao dataset sem pré-processamento
+    dataset: pavement_v3

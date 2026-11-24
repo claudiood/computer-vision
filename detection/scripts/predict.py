@@ -6,7 +6,7 @@ pré-processamento como CLAHE) é lido do dataset_info.json do dataset usado no
 treino. Sem isso, o modelo veria no uso imagens diferentes das do treino.
 
 Uso:
-  python scripts/predict.py --run results/experiments/08_final/final/s0_f0 --source pasta_ou_imagem --conf 0.25
+  python scripts/predict.py --run results/experiments/08_final/final_trainval/s0_ftrainval --source pasta_ou_imagem --conf 0.25
 """
 from __future__ import annotations
 
@@ -45,7 +45,9 @@ def main() -> None:
     files = [src] if src.is_file() else sorted(p for p in src.rglob("*") if p.suffix.lower() in IMG_EXTS)
     out = Path(args.out) if args.out else RESULTS_DIR / "predictions" / Path(args.run).parent.name
     out.mkdir(parents=True, exist_ok=True)
-    model = YOLO(meta["weights"]["best"])
+    # treino em treino+validação: vale a última época (o best.pt foi escolhido por uma validação contida no treino)
+    wkey = "last" if str(cfg.get("data")) == "trainval" else "best"
+    model = YOLO(meta["weights"][wkey])
     imgsz = cfg["train"].get("imgsz", 640)
     device = resolve_device(args.device or meta.get("device"))
     print(f"Pré-processamento: {pre or 'nenhum'}; max_side={max_side}; imgsz={imgsz}; device={device}")

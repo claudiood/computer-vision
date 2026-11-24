@@ -1,15 +1,17 @@
-# E3 — Resolução de entrada (imgsz), com o melhor modelo do E2.
-# As fotos têm de 0,2 a 16 MP e as rachaduras são finas: em 640 px uma
-# rachadura de poucos pixels de largura pode sumir. A auditoria mede o menor
-# lado das caixas em cada imgsz. Custo: memória e tempo crescem ~ imgsz²,
-# por isso o batch cai junto.
+# E3 — Resolução de entrada (imgsz) com o melhor modelo até aqui (E1/E2).
+# As rachaduras são finas: em resoluções menores elas podem sumir. O 960 já
+# foi treinado (E1/E2) e entra como referência, sem treinar de novo.
+# Custo: tempo cresce ~ imgsz². O batch fica igual (8) para a comparação ser justa.
+# Se o E2 empatar (diferença inconsistente entre os folds), rode também o 1280
+# no segundo modelo:  --set model=<modelo>.pt  (o resultado entra no registro).
 extends: ../base_train.yaml
 name: 03_imgsz
-description: imgsz 640 / 960 / 1280 com o melhor modelo do 02_models
-inherit_best: 02_models
+description: imgsz 1280 com o melhor modelo do E1/E2 (o 960 vem de lá), folds 0-2
+inherit_best: [01_baseline, 02_models]
+folds: [0, 1, 2]
 seeds: [0]
-reference: imgsz_640
+include_best:
+  imgsz 960 (E1/E2): [01_baseline, 02_models]
+reference: imgsz 960 (E1/E2)
 variants:
-  imgsz_640: {train: {imgsz: 640, batch: 16}}
-  imgsz_960: {train: {imgsz: 960, batch: 8}}
-  imgsz_1280: {train: {imgsz: 1280, batch: 4}}
+  imgsz_1280: {train: {imgsz: 1280}}

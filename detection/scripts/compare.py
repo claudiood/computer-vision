@@ -1,20 +1,31 @@
 #!/usr/bin/env python3
 """Compara execuções registradas (results/registry.jsonl): tabelas e gráficos.
 
-Para cada experimento: média ± desvio (entre seeds/folds) de cada variante,
-diferença para a referência (variante `control`, ou a primeira), e se essa
-diferença supera o RUÍDO medido no 01_baseline (desvio entre seeds idênticas).
+Para cada experimento: média ± desvio (entre folds) de cada variante e a
+diferença para a referência, calculada de forma PAREADA: fold contra o mesmo
+fold. Como todos os experimentos usam os mesmos folds (0, 1, 2), a diferença
+de dificuldade entre folds se cancela e sobra o efeito da mudança testada.
+
+Veredito de cada variante contra a referência:
+  melhor   ganhou em TODOS os folds em comum
+  pior     perdeu em todos os folds em comum
+  empate   o sinal muda entre os folds (a diferença não é consistente)
+
+Referências de fora do experimento: a chave `include_best` do YAML traz a
+melhor variante de outros experimentos já rodados (ex.: o yolo26n do E1 entra
+no E2 sem treinar de novo).
 
 Saída em results/comparisons/<nome>/:
-  summary.csv / summary.md         tabela completa (gerais, por classe, tempo, custo)
-  <exp>_<métrica>.png              barras com erro e faixa de ruído
+  summary.csv / summary.md         tabela completa (gerais, por classe, tempo)
+  <exp>_<métrica>.png              barras com erro
   <exp>_per_class_F1.png           F1 por classe de cada variante
   tradeoff_*.png                   métrica × tempo de inferência / de treino
   all_runs.csv                     uma linha por execução (para análises próprias)
 
 Uso:
-  python scripts/compare.py                          # todos os experimentos
-  python scripts/compare.py --experiments 02_models 03_imgsz --metric mAP50
+  python scripts/compare.py --experiments 02_models
+  python scripts/compare.py --experiments 01_baseline 02_models 03_imgsz 04_clahe 06_ablation --out resumo
+  python scripts/compare.py --experiments 05_optuna --metric mAP50
 """
 from __future__ import annotations
 
@@ -28,18 +39,16 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from pavedet import plots  # noqa: E402
-from pavedet.config import RESULTS_DIR  # noqa: E402
+from pavedet.config import CONFIG_DIR, RESULTS_DIR, load_experiment  # noqa: E402
 from pavedet.metrics import flat  # noqa: E402
-from pavedet.tracking import read_registry  # noqa: E402
-
-MAIN = ["mAP50_95", "mAP50", "P", "R", "F1", "P_op", "R_op", "F1_op"]
+from pavedet.tracking import best_of, read_registry  # noqa: E402
 
 
 def runs_table(entries: list[dict]) -> pd.DataFrame:
     rows = []
     for e in entries:
         m = e["metrics"]
-        rows.append({"experiment": e["experiment"], "variant": e["variant"], "seed": e["seed"], "fold": e["fold"],
+        rows.append({"experiment": e["experiment"], "variant": e["variant"], "seed": e["seed"], "fold": str(e["fold"]),
                      "model": e["config"].get("model"), "imgsz": e["config"]["train"].get("imgsz"),
                      "dataset": e["config"].get("dataset"), "oversample": str(e["config"].get("oversample")),
                      "epochs_run": e.get("epochs_run"), "best_epoch": e.get("best_epoch"),
@@ -49,26 +58,55 @@ def runs_table(entries: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def noise_std(df: pd.DataFrame, metric: str) -> float | None:
-    """Desvio entre seeds no baseline; se não houver, média dos desvios de grupos com >1 seed."""
-    base = df[df.experiment.str.startswith("01_baseline")]
-    if len(base) > 1:
-        return float(base[metric].std(ddof=1))
-    stds = df.groupby(["experiment", "variant", "fold"])[metric].std(ddof=1).dropna()
-    return float(stds.mean()) if len(stds) else None
+def experiment_yaml(experiment: str) -> dict:
+    try:
+        return load_experiment(CONFIG_DIR / "experiments" / f"{experiment}.yaml")
+    except Exception:
+        return {}
+
+
+def external_refs(experiment: str, metric: str, registry: list[dict]) -> list[dict]:
+    """Execuções trazidas de outros experimentos pela chave `include_best` do YAML."""
+    out = []
+    for label, sources in (experiment_yaml(experiment).get("include_best") or {}).items():
+        best = best_of(sources, metric, registry)
+        if best is None:
+            print(f"AVISO: include_best '{label}': nenhum de {sources} tem execuções concluídas")
+            continue
+        _, src_exp, src_var, _, runs = best
+        for r in runs:
+            out.append({**r, "experiment": experiment, "variant": label, "_source": f"{src_exp}/{src_var}"})
+    return out
 
 
 def reference_of(experiment: str, variants: set) -> str:
-    """Variante de referência: chave `reference` do YAML do experimento, senão `control`, senão a primeira."""
-    try:
-        from pavedet.config import CONFIG_DIR, load_experiment
-
-        ref = load_experiment(CONFIG_DIR / "experiments" / f"{experiment}.yaml").get("reference")
-        if ref in variants:
-            return ref
-    except Exception:
-        pass
+    """Variante de referência: chave `reference` do YAML, senão `control`, senão a primeira."""
+    ref = experiment_yaml(experiment).get("reference")
+    if ref in variants:
+        return ref
     return "control" if "control" in variants else sorted(variants)[0]
+
+
+def paired(df: pd.DataFrame, var: str, ref: str, metric: str) -> tuple[float, str, str]:
+    """Diferença pareada por fold (média das seeds de cada fold). Retorna (Δ médio, veredito, Δ por fold)."""
+    a = df[df.variant == var].groupby("fold")[metric].mean()
+    b = df[df.variant == ref].groupby("fold")[metric].mean()
+    common = sorted(set(a.index) & set(b.index))
+    if var == ref:
+        return 0.0, "referência", ""
+    if not common:
+        return float("nan"), "sem folds em comum", ""
+    d = np.array([a[f] - b[f] for f in common])
+    if len(d) >= 2 and (d > 0).all():
+        verdict = "melhor"
+    elif len(d) >= 2 and (d < 0).all():
+        verdict = "pior"
+    elif len(d) < 2:
+        verdict = "1 fold só"
+    else:
+        verdict = "empate"
+    per_fold = ", ".join(f"f{f}: {x:+.3f}" for f, x in zip(common, d))
+    return float(d.mean()), verdict, per_fold
 
 
 def main() -> None:
@@ -78,9 +116,13 @@ def main() -> None:
     ap.add_argument("--out", default=None, help="nome da pasta em results/comparisons/")
     args = ap.parse_args()
 
-    entries = read_registry()
+    registry = read_registry()
+    metric = args.metric
+    entries = registry
     if args.experiments:
-        entries = [e for e in entries if e["experiment"] in args.experiments]
+        entries = [e for e in registry if e["experiment"] in args.experiments]
+        for exp in args.experiments:
+            entries += external_refs(exp, metric, registry)
     if not entries:
         raise SystemExit("Nenhuma execução concluída encontrada no registro.")
     df = runs_table(entries)
@@ -88,50 +130,53 @@ def main() -> None:
     out = RESULTS_DIR / "comparisons" / tag
     out.mkdir(parents=True, exist_ok=True)
     df.to_csv(out / "all_runs.csv", index=False)
-    metric = args.metric
-    noise = noise_std(runs_table(read_registry()), metric)  # ruído do registro inteiro
     classes = sorted({c.split("__", 1)[1] for c in df.columns if c.startswith("F1__")})
 
-    agg_cols = [c for c in MAIN + [f"F1__{c}" for c in classes] + [f"mAP50_95__{c}" for c in classes]
+    agg_cols = [c for c in ["mAP50_95", "mAP50", "P", "R", "F1", "P_op", "R_op", "F1_op", "best_conf"]
+                + [f"F1__{c}" for c in classes] + [f"mAP50_95__{c}" for c in classes]
                 + ["train_time_min", "speed_inference_ms", "params_M", "gflops", "best_epoch", "epochs_run"] if c in df]
     g = df.groupby(["experiment", "variant"], sort=False)
     summ = g[agg_cols].mean()
-    summ.columns = [f"{c}" for c in summ.columns]
     summ[f"{metric}_std"] = g[metric].std(ddof=1)
     summ["n_runs"] = g.size()
+    summ["folds"] = g["fold"].apply(lambda s: ",".join(sorted(set(s))))
     summ = summ.reset_index()
 
-    lines = [f"# Comparação — {tag}", "", f"Métrica de seleção: **{metric}** (validação). "
-             f"Ruído (desvio entre seeds do baseline): **{noise:.4f}**" if noise else
-             f"Métrica de seleção: **{metric}**. Ruído: indisponível (rode 01_baseline com 3 seeds).", ""]
+    lines = [f"# Comparação — {tag}", "",
+             f"Métrica de seleção: **{metric}** (validação). Δ ref = diferença pareada por fold contra a "
+             "referência. Veredito: **melhor**/**pior** = ganhou/perdeu em todos os folds; **empate** = o sinal "
+             "muda entre os folds.", ""]
     rows_out = []
     for exp, s in summ.groupby("experiment", sort=False):
         s = s.copy()
+        dexp = df[df.experiment == exp]
         ref_name = reference_of(exp, set(s.variant))
-        ref = float(s.loc[s.variant == ref_name, metric].iloc[0])
-        s["delta_vs_ref"] = s[metric] - ref
-        s["supera_ruido"] = s["delta_vs_ref"].apply(lambda d: "sim" if noise and abs(d) > noise and d > 0
-                                                    else ("pior" if noise and d < -noise else "não"))
+        res = [paired(dexp, v, ref_name, metric) for v in s.variant]
+        s["delta_vs_ref"] = [r[0] for r in res]
+        s["veredito"] = [r[1] for r in res]
+        s["delta_por_fold"] = [r[2] for r in res]
         s = s.sort_values(metric, ascending=False)
         rows_out.append(s)
+        ref_val = float(s.loc[s.variant == ref_name, metric].iloc[0])
         lines += [f"## {exp}", "", f"Referência: `{ref_name}`.", "",
-                  "| variante | n | " + metric + " | ± | Δ ref | supera ruído | mAP50 | F1 | F1_op | "
-                  + " | ".join(f"F1 {c}" for c in classes) + " | treino (min) | inferência (ms) |",
-                  "|---" * (11 + len(classes)) + "|"]
+                  "| variante | folds | " + metric + " | ± | Δ ref | veredito | Δ por fold | mAP50 | F1 | "
+                  + " | ".join(f"F1 {c}" for c in classes) + " | treino (min) |",
+                  "|---" * (10 + len(classes)) + "|"]
         for _, r in s.iterrows():
-            lines.append(f"| {r.variant} | {int(r.n_runs)} | {r[metric]:.4f} | "
-                         f"{r[f'{metric}_std'] if r[f'{metric}_std'] == r[f'{metric}_std'] else float('nan'):.4f} | "
-                         f"{r.delta_vs_ref:+.4f} | {r.supera_ruido} | {r.get('mAP50', np.nan):.3f} | "
-                         f"{r.get('F1', np.nan):.3f} | {r.get('F1_op', np.nan):.3f} | "
+            std = r[f"{metric}_std"]
+            lines.append(f"| {r.variant} | {r.folds} | {r[metric]:.4f} | {std if std == std else float('nan'):.4f} | "
+                         f"{r.delta_vs_ref:+.4f} | {r.veredito} | {r.delta_por_fold} | {r.get('mAP50', np.nan):.3f} | "
+                         f"{r.get('F1', np.nan):.3f} | "
                          + " | ".join(f"{r.get(f'F1__{c}', np.nan):.3f}" for c in classes)
-                         + f" | {r.get('train_time_min', np.nan):.1f} | {r.get('speed_inference_ms', np.nan):.1f} |")
+                         + f" | {r.get('train_time_min', np.nan):.1f} |")
         best = s.iloc[0]
-        lines += ["", f"Melhor: **{best.variant}** ({metric} = {best[metric]:.4f}, Δ = {best.delta_vs_ref:+.4f}; "
-                  f"supera o ruído: {best.supera_ruido}).", ""]
-        # gráficos do experimento
+        lines += ["", f"Maior média: **{best.variant}** ({metric} = {best[metric]:.4f}, Δ = {best.delta_vs_ref:+.4f}, "
+                  f"veredito: {best.veredito}). A herança (`inherit_best`) dos próximos experimentos usa a maior "
+                  "média; se o veredito for empate, a diferença não é confiável e vale preferir a opção mais "
+                  "simples/barata (passe-a com --set).", ""]
         plots.comparison_bars(list(s.variant), list(s[metric]), list(s[f"{metric}_std"].fillna(0)),
-                              out / f"{exp}_{metric}.png", f"{exp}: {metric} na validação (média ± desvio)",
-                              metric, ref=ref, ref_band=noise)
+                              out / f"{exp}_{metric}.png", f"{exp}: {metric} na validação (média ± desvio entre folds)",
+                              metric, ref=ref_val)
         if classes:
             plots.grouped_bars(list(s.variant), {c: list(s.get(f"F1__{c}", np.nan)) for c in classes},
                                out / f"{exp}_per_class_F1.png", f"{exp}: F1 por classe", "F1")

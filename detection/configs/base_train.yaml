@@ -8,10 +8,10 @@
 #   device            auto (cuda > mps > cpu), 0, mps, cpu
 #   selection_metric  métrica usada para escolher a melhor variante de cada experimento
 #   op_conf           limiar de confiança do "ponto de operação" (P_op/R_op/F1_op)
-#   oversample        estratégia contra desbalanceamento (null = desligado); ver 05_imbalance.yaml
+#   oversample        estratégia contra desbalanceamento (null = desligado); escolhida pelo Optuna (E5)
 #   train             argumentos repassados a model.train() da Ultralytics
 
-dataset: pavement_v2
+dataset: pavement_v3
 data: fold0
 model: yolo26n.pt
 device: auto
@@ -20,15 +20,16 @@ op_conf: 0.25
 oversample: null
 
 train:
-  epochs: 150          # dataset pequeno (~100 imagens de treino): poucas iterações por época
-  patience: 30         # early stopping
-  imgsz: 640
-  batch: 16
-  optimizer: auto      # com auto, lr0 é ignorado (manual, seção 10); o Optuna fixa o otimizador
+  epochs: 100          # teto; o early stopping (patience) decide onde parar
+  patience: 25         # na rodada anterior a melhor época ficou entre 20 e 70
+  imgsz: 960           # E3 testa 1280
+  batch: 8             # o MESMO batch em todos os experimentos (cabe 26s a 1280 na A6000)
+  optimizer: auto      # com auto, lr0 é ignorado; o Optuna fixa o otimizador
   seed: 0
   deterministic: true
-  workers: 4
-  cache: false
+  workers: 6           # = vCPUs da máquina; o carregamento de imagens era o gargalo
+  cache: disk          # guarda as imagens decodificadas (.npy): poupa a CPU a cada época.
+                       # 'ram' é parecido, mas a Ultralytics avisa que não é determinístico
   amp: true
   plots: true
   val: true

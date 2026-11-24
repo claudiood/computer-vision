@@ -7,10 +7,10 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import DATA_DIR, deep_merge, load_yaml, resolve_path, save_yaml
+from .config import DATA_DIR, RESULTS_DIR, deep_merge, load_yaml, resolve_path, save_yaml
 from .env import env_info, free_memory, gpu_peak_mb, peak_rss_mb, resolve_device
 from .metrics import extract, merge_operating_point, operating_point, read_image_list
-from .tracking import append_registry, best_variant, prepare_run_dir, read_meta, run_dir_for, write_meta
+from .tracking import append_registry, best_of, prepare_run_dir, read_meta, read_registry, run_dir_for, write_meta
 
 PIPELINE_KEYS = {"dataset", "data", "model", "device", "selection_metric", "op_conf", "oversample", "train"}
 
@@ -28,25 +28,20 @@ def resolve_config(exp: dict, variant_cfg: dict | None = None, cli: dict | None 
     inherit = exp.get("inherit_best")
     if inherit:
         # uma lista = escolhe o melhor ENTRE os experimentos listados (ex.: se o Optuna
-        # não superou o E5, a configuração do E5 é a herdada automaticamente)
+        # não superou o E1–E4 na ablação, a configuração sem Optuna é a herdada)
+        names = [inherit] if isinstance(inherit, str) else list(inherit)
         metric = cfg.get("selection_metric", "mAP50_95")
-        best, missing = None, []
-        for name in [inherit] if isinstance(inherit, str) else inherit:
-            try:
-                var, best_cfg, runs = best_variant(name, metric)
-            except SystemExit:
-                missing.append(name)
-                continue
-            score = float(np.mean([r["metrics"][metric] for r in runs]))
-            if best is None or score > best[0]:
-                best = (score, name, var, best_cfg)
+        entries = read_registry()
+        best = best_of(names, metric, entries)
+        done = {e.get("experiment") for e in entries}
+        missing = [n for n in names if n not in done]
         if missing:
             msg = f"sem execuções concluídas de {missing} no registro (herança: {inherit})"
             if best is None and not allow_missing:
                 raise SystemExit(f"Não dá para herdar a configuração: {msg}. Rode esse(s) experimento(s) antes.")
             print(f"AVISO: {msg}" + ("" if best else " — usando a config-base (dry-run)."))
         if best is not None:
-            _, name, var, best_cfg = best
+            _, name, var, best_cfg, _ = best
             best_cfg = {k: v for k, v in best_cfg.items() if k in PIPELINE_KEYS}
             best_cfg.get("train", {}).pop("seed", None)  # seed e fold vêm do experimento atual
             best_cfg.pop("data", None)
@@ -55,7 +50,23 @@ def resolve_config(exp: dict, variant_cfg: dict | None = None, cli: dict | None 
     cfg = deep_merge(cfg, exp.get("overrides") or {})
     cfg = deep_merge(cfg, variant_cfg or {})
     cfg = deep_merge(cfg, cli or {})
+    if cfg.get("train", {}).get("epochs") == "cv_median":
+        cfg["train"]["epochs"] = cv_median_epochs(allow_missing)
     return cfg
+
+
+def cv_median_epochs(allow_missing: bool = False) -> int:
+    """Épocas do treino definitivo em treino+validação: mediana da melhor época da validação
+    cruzada (results/cv/cv_summary.json, gerado por scripts/cv_report.py)."""
+    import json
+
+    f = RESULTS_DIR / "cv" / "cv_summary.json"
+    if not f.exists():
+        if allow_missing:
+            print("AVISO: results/cv/cv_summary.json não existe — usando 100 épocas (dry-run).")
+            return 100
+        raise SystemExit(f"{f} não existe. Rode antes: python scripts/cv_report.py")
+    return int(json.loads(f.read_text(encoding="utf-8"))["median_best_epoch"])
 
 
 def data_yaml_path(cfg: dict) -> Path:

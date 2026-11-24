@@ -9,8 +9,8 @@ interromper e continuar depois.
 Exemplos:
   python scripts/run_experiment.py 01_baseline
   python scripts/run_experiment.py 02_models --variants yolo11n yolo26n
-  python scripts/run_experiment.py 03_imgsz --seeds 0 1 2            # repetir para medir a variância
-  python scripts/run_experiment.py 02_models --folds 0 1 2           # validação cruzada (mais robusto)
+  python scripts/run_experiment.py 02_models --variants yolo26s     # só uma variante (ex.: em paralelo)
+  python scripts/run_experiment.py 02_models --folds 0               # só um fold (os YAMLs usam 0 1 2)
   python scripts/run_experiment.py 01_baseline --set train.epochs=5 --dry-run
   python scripts/run_experiment.py --list
 """
@@ -38,6 +38,14 @@ def find_experiment(name: str) -> Path:
     if len(matches) == 1:
         return matches[0]
     raise SystemExit(f"Experimento '{name}' não encontrado em {exp_dir}")
+
+
+def config_key(cfg: dict) -> str:
+    """Assinatura da configuração (sem campos internos), para achar variantes iguais."""
+    import json
+
+    clean = {k: v for k, v in cfg.items() if not k.startswith("_")}
+    return json.dumps(clean, sort_keys=True, default=str)
 
 
 def main() -> None:
@@ -74,6 +82,21 @@ def main() -> None:
     print(f"== {name}: {len(variants)} variantes × {len(seeds)} seeds × {len(folds)} folds")
     if exp.get("description"):
         print("   " + exp["description"].strip().replace("\n", "\n   "))
+    # skip_duplicates: uma variante cuja configuração ficaria IGUAL à de outra (ex.: na
+    # ablação, "minus_clahe" quando o CLAHE não foi adotado) é pulada em vez de treinar de novo
+    if exp.get("skip_duplicates"):
+        all_vars = dict(exp.get("variants") or {})
+        variants = dict(variants)
+        seen = {}
+        for vname, vcfg in all_vars.items():
+            key = config_key(resolve_config(exp, vcfg, cli, allow_missing=args.dry_run))
+            if key in seen:
+                if vname in variants:
+                    print(f"[igual a '{seen[key]}'] {vname}: o componente não foi adotado; variante pulada")
+                    variants.pop(vname)
+            else:
+                seen[key] = vname
+
     done, failed = 0, []
     for vname, vcfg in variants.items():
         for fold in folds:
