@@ -1,18 +1,16 @@
-# E2 — Versões e tamanhos da YOLO (mesma imgsz 960, mesmos padrões).
-# O yolo26n já foi treinado no E1 e entra na comparação como referência, sem
-# treinar de novo (include_best). Modelos m/l ficam de fora: com ~120 imagens
-# de treino tendem a decorar o treino e custam bem mais tempo.
-# Para rodar os dois em paralelo na mesma GPU (dois terminais):
-#   python scripts/run_experiment.py 02_models --variants yolo26s
-#   python scripts/run_experiment.py 02_models --variants yolo11n
+# E2 — Tamanhos s e m da família vencedora do E1 ({family} = yolo26 ou yolo11).
+# O n já foi treinado no E1 e entra como referência, sem treinar de novo.
+# l e x ficam de fora: com ~150 imagens tendem a decorar o treino e custam muito tempo.
+# Um tamanho maior só é adotado se superar o n por mais que a margem (adopt_margin).
 extends: ../base_train.yaml
 name: 02_models
-description: yolo26s e yolo11n a 960 (o yolo26n vem do E1), folds 0-2
-folds: [0, 1, 2]
+description: tamanhos s e m da família vencedora do E1 (o n vem do E1), fold 0
+inherit_best: [01_baseline]
+folds: [0]
 seeds: [0]
 include_best:
-  yolo26n (E1): [01_baseline]
-reference: yolo26n (E1)
+  n (E1): [01_baseline]
+reference: n (E1)
 variants:
-  yolo26s: {model: yolo26s.pt}
-  yolo11n: {model: yolo11n.pt}
+  s: {model: "{family}s.pt"}
+  m: {model: "{family}m.pt"}

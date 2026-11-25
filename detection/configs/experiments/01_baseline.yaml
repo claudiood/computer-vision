@@ -1,12 +1,11 @@
-# E1 — Linha de base.
-# YOLO26n, imgsz 960 e TODOS os padrões da Ultralytics (configs/base_train.yaml).
-# Três folds (0, 1, 2): além do ponto de partida, mostra quanto o resultado varia
-# só por trocar as imagens de validação. Todos os experimentos usam os mesmos
-# três folds, então as comparações são PAREADAS (mesmo fold contra mesmo fold).
+# E1 — Linha de base: duas famílias da YOLO no tamanho n.
+# imgsz 960 e TODOS os padrões da Ultralytics (configs/base_train.yaml).
+# As decisões do E1 ao E6 usam só o fold 0; a validação cruzada (E7) confere no fim.
 extends: ../base_train.yaml
 name: 01_baseline
-description: YOLO26n, imgsz 960, padrões da Ultralytics, folds 0-2
-folds: [0, 1, 2]
+description: yolo26n × yolo11n, imgsz 960, padrões, fold 0
+folds: [0]
 seeds: [0]
 variants:
-  yolo26n_960: {}
+  yolo26n: {model: yolo26n.pt}
+  yolo11n: {model: yolo11n.pt}

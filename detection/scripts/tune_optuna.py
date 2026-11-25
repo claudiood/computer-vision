@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""E5 — Otimização de hiperparâmetros e aumento de dados com Optuna (só na validação).
+"""E6 — Otimização dos hiperparâmetros de treino com Optuna (só na validação, fold 0).
 
 O estudo fica salvo em results/optuna/<study_name>.db (SQLite): pode ser
 interrompido e continuado, e todos os trials ficam registrados. Cada trial
-também é uma execução normal em results/experiments/05_optuna/trial_XXXX/.
+também é uma execução normal em results/experiments/06_optuna/trial_XXXX/.
 
-A melhor configuração NÃO é adotada direto: a ablação (E6) a treina por
-completo nos folds 0-2 e a compara com a configuração sem Optuna.
+A melhor configuração NÃO é adotada direto: o E6b (06b_optuna_best) a treina com
+o número normal de épocas no fold 0, e ela só é adotada se superar a configuração
+vigente por mais que a margem (adopt_margin).
 
 Uso:
   python scripts/tune_optuna.py                          # roda/continua o estudo de configs/optuna.yaml
@@ -185,7 +186,7 @@ def main() -> None:
     study.optimize(objective, n_trials=n, timeout=timeout, gc_after_trial=True,
                    catch=(RuntimeError, ValueError))
     report(study, out_dir)
-    print("\nPróximo passo (E6): python scripts/run_experiment.py 06_ablation")
+    print("\nPróximo passo (E6b): python scripts/run_experiment.py 06b_optuna_best")
 
 
 if __name__ == "__main__":

@@ -2,14 +2,14 @@
 # (todas as imagens menos o teste). Como não sobra validação independente, o
 # número de épocas é fixo: a mediana da melhor época da validação cruzada (E7),
 # lida de results/cv/cv_summary.json (rode scripts/cv_report.py antes).
-# patience: 0 desliga o early stopping.
+# patience: 0 desliga o early stopping. Vale o modelo da última época (last.pt).
 # 3 seeds: o resultado no teste é a MÉDIA ± desvio, não o melhor seed.
 # Avaliação no teste (uma vez):
 #   python scripts/final_test.py --experiment 08_final --confirm --conf cv
 extends: ../base_train.yaml
 name: 08_final
 description: config vencedora em treino+validação, épocas da CV, 3 seeds (teste UMA vez)
-inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 06_ablation]
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation, 06b_optuna_best]
 seeds: [0, 1, 2]
 variants:
   final_trainval: {data: trainval, train: {epochs: cv_median, patience: 0}}

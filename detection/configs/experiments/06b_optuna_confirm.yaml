@@ -1,9 +1,0 @@
-# E6b — Confirmação do Optuna. NÃO edite as variantes à mão: este arquivo só
-# documenta o experimento. As variantes (top-K trials do estudo, treinadas com
-# o número completo de épocas e mais seeds) são criadas por:
-#   python scripts/tune_optuna.py --confirm-top 3
-# porque trials curtos (poucas épocas, com poda) são ruidosos e o "melhor
-# trial" pode ter sido sorte.
-extends: ../base_train.yaml
-name: 06b_optuna_confirm
-description: top-K configurações do Optuna treinadas por completo (gerado por tune_optuna.py)

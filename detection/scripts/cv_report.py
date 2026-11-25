@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""E7 — Relatório da validação cruzada (5 folds) da configuração escolhida.
+"""E7 — Relatório da validação cruzada (3 folds) da configuração escolhida.
 
-A configuração vencedora é a mesma que o 07_cv e o 08_final herdam (o melhor entre
-os experimentos do `inherit_best` do 07_cv.yaml). Os folds 0-2 vêm do experimento
-de onde ela saiu; os folds 3 e 4, do 07_cv. O script confere que as configurações
-são iguais antes de juntar.
+A configuração vencedora é a mesma que o 07_cv e o 08_final herdam (a vigente ao
+fim do `inherit_best` do 07_cv.yaml). O fold 0 vem do experimento de onde ela saiu;
+os folds 1 e 2, do 07_cv. O script confere que as configurações são iguais antes
+de juntar.
 
 Saída em results/cv/:
-  cv_summary.json   média ± desvio (5 folds), mediana da melhor época (usada no E8)
+  cv_summary.json   média ± desvio (3 folds), mediana da melhor época (usada no E8)
                     e o limiar de confiança que maximiza o F1 (mediana entre folds)
   cv_report.md      tabela por fold e por classe (vai para o relatório)
   cv_runs.csv       uma linha por fold
@@ -45,7 +45,8 @@ def main() -> None:
     registry = read_registry()
     metric = exp_cv.get("selection_metric", "mAP50_95")
     sources = exp_cv["inherit_best"]
-    best = best_of(sources, metric, [e for e in registry if e["experiment"] != "07_cv"])
+    best = best_of(sources, metric, [e for e in registry if e["experiment"] != "07_cv"],
+                   margin=float(exp_cv.get("adopt_margin", 0.0)))
     if best is None:
         raise SystemExit(f"Nenhuma execução concluída em {sources}.")
     _, src_exp, src_var, src_cfg, src_runs = best
@@ -98,8 +99,9 @@ def main() -> None:
     L += ["", f"Mediana da melhor época: **{summary['median_best_epoch']}** (épocas do treino definitivo, E8).",
           f"Limiar de confiança que maximiza o F1 (mediana): **{summary['best_conf_median']}** "
           "(use no teste com `final_test.py --conf cv`).", "",
-          "Observação: o fold 0 foi usado pelo Optuna para escolher os hiperparâmetros; os folds 3 e 4 não "
-          "participaram de nenhuma escolha."]
+          "Observação: o fold 0 foi usado em todas as decisões (modelo, tamanho, resolução, CLAHE, aumento "
+          "e Optuna); os folds 1 e 2 não participaram de nenhuma escolha. Se a média dos folds 1 e 2 ficar bem "
+          "abaixo do fold 0, as escolhas se ajustaram demais ao fold 0."]
     (out / "cv_report.md").write_text("\n".join(L) + "\n", encoding="utf-8")
     print("\n".join(L))
     print(f"\nSaída: {out.relative_to(PROJECT_ROOT) if out.is_relative_to(PROJECT_ROOT) else out}")

@@ -1,14 +1,14 @@
-# E7 — Validação cruzada da configuração escolhida (5 folds).
-# A configuração vencedora (o melhor entre E1, E2, E3, E4 e E6) já tem os folds
-# 0-2 treinados; aqui rodam só os folds 3 e 4. O relatório junta os 5:
+# E7 — Validação cruzada de 3 folds da configuração escolhida.
+# A configuração vigente ao fim do E1–E6 já tem o fold 0 treinado; aqui rodam os
+# folds 1 e 2 (que não participaram de nenhuma decisão). O relatório junta os 3:
 #   python scripts/cv_report.py
-# Ele dá o número principal do relatório (média ± desvio em 5 folds), a mediana
+# Ele dá o número principal do relatório (média ± desvio em 3 folds), a mediana
 # da melhor época (usada no E8) e o limiar de confiança que maximiza o F1.
 extends: ../base_train.yaml
 name: 07_cv
-description: config vencedora nos folds 3 e 4 (os folds 0-2 já existem)
-inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 06_ablation]
-folds: [3, 4]
+description: config vencedora nos folds 1 e 2 (o fold 0 já existe)
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation, 06b_optuna_best]
+folds: [1, 2]
 seeds: [0]
 variants:
   cv: {}

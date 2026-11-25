@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Compara execuções registradas (results/registry.jsonl): tabelas e gráficos.
 
-Para cada experimento: média ± desvio (entre folds) de cada variante e a
-diferença para a referência, calculada de forma PAREADA: fold contra o mesmo
-fold. Como todos os experimentos usam os mesmos folds (0, 1, 2), a diferença
-de dificuldade entre folds se cancela e sobra o efeito da mudança testada.
+Para cada experimento: a métrica de cada variante e a diferença para a
+referência, calculada fold contra o mesmo fold (as decisões usam o fold 0).
 
-Veredito de cada variante contra a referência:
-  melhor   ganhou em TODOS os folds em comum
-  pior     perdeu em todos os folds em comum
-  empate   o sinal muda entre os folds (a diferença não é consistente)
+Veredito de cada variante contra a referência (margem = `adopt_margin`, 0,015):
+  melhor   superou a referência por mais que a margem
+  pior     perdeu por mais que a margem
+  empate   diferença menor que a margem: ruído, fica a opção mais simples
+Com mais de um fold em comum, "melhor"/"pior" exige o mesmo sinal em todos.
 
 Referências de fora do experimento: a chave `include_best` do YAML traz a
 melhor variante de outros experimentos já rodados (ex.: o yolo26n do E1 entra
@@ -68,8 +67,9 @@ def experiment_yaml(experiment: str) -> dict:
 def external_refs(experiment: str, metric: str, registry: list[dict]) -> list[dict]:
     """Execuções trazidas de outros experimentos pela chave `include_best` do YAML."""
     out = []
-    for label, sources in (experiment_yaml(experiment).get("include_best") or {}).items():
-        best = best_of(sources, metric, registry)
+    y = experiment_yaml(experiment)
+    for label, sources in (y.get("include_best") or {}).items():
+        best = best_of(sources, metric, registry, margin=float(y.get("adopt_margin", 0.0)))
         if best is None:
             print(f"AVISO: include_best '{label}': nenhum de {sources} tem execuções concluídas")
             continue
@@ -87,7 +87,7 @@ def reference_of(experiment: str, variants: set) -> str:
     return "control" if "control" in variants else sorted(variants)[0]
 
 
-def paired(df: pd.DataFrame, var: str, ref: str, metric: str) -> tuple[float, str, str]:
+def paired(df: pd.DataFrame, var: str, ref: str, metric: str, margin: float = 0.015) -> tuple[float, str, str]:
     """Diferença pareada por fold (média das seeds de cada fold). Retorna (Δ médio, veredito, Δ por fold)."""
     a = df[df.variant == var].groupby("fold")[metric].mean()
     b = df[df.variant == ref].groupby("fold")[metric].mean()
@@ -97,12 +97,10 @@ def paired(df: pd.DataFrame, var: str, ref: str, metric: str) -> tuple[float, st
     if not common:
         return float("nan"), "sem folds em comum", ""
     d = np.array([a[f] - b[f] for f in common])
-    if len(d) >= 2 and (d > 0).all():
+    if d.mean() > margin and (d > 0).all():
         verdict = "melhor"
-    elif len(d) >= 2 and (d < 0).all():
+    elif d.mean() < -margin and (d < 0).all():
         verdict = "pior"
-    elif len(d) < 2:
-        verdict = "1 fold só"
     else:
         verdict = "empate"
     per_fold = ", ".join(f"f{f}: {x:+.3f}" for f, x in zip(common, d))
@@ -143,15 +141,16 @@ def main() -> None:
     summ = summ.reset_index()
 
     lines = [f"# Comparação — {tag}", "",
-             f"Métrica de seleção: **{metric}** (validação). Δ ref = diferença pareada por fold contra a "
-             "referência. Veredito: **melhor**/**pior** = ganhou/perdeu em todos os folds; **empate** = o sinal "
-             "muda entre os folds.", ""]
+             f"Métrica de seleção: **{metric}** (validação). Δ ref = diferença contra a referência, fold a fold. "
+             "Veredito: **melhor**/**pior** = diferença maior que a margem de adoção (0,015); **empate** = "
+             "menor que a margem (ruído).", ""]
     rows_out = []
     for exp, s in summ.groupby("experiment", sort=False):
         s = s.copy()
         dexp = df[df.experiment == exp]
         ref_name = reference_of(exp, set(s.variant))
-        res = [paired(dexp, v, ref_name, metric) for v in s.variant]
+        margin = float(experiment_yaml(exp).get("adopt_margin", 0.015))
+        res = [paired(dexp, v, ref_name, metric, margin) for v in s.variant]
         s["delta_vs_ref"] = [r[0] for r in res]
         s["veredito"] = [r[1] for r in res]
         s["delta_por_fold"] = [r[2] for r in res]
@@ -170,10 +169,9 @@ def main() -> None:
                          + " | ".join(f"{r.get(f'F1__{c}', np.nan):.3f}" for c in classes)
                          + f" | {r.get('train_time_min', np.nan):.1f} |")
         best = s.iloc[0]
-        lines += ["", f"Maior média: **{best.variant}** ({metric} = {best[metric]:.4f}, Δ = {best.delta_vs_ref:+.4f}, "
-                  f"veredito: {best.veredito}). A herança (`inherit_best`) dos próximos experimentos usa a maior "
-                  "média; se o veredito for empate, a diferença não é confiável e vale preferir a opção mais "
-                  "simples/barata (passe-a com --set).", ""]
+        lines += ["", f"Maior valor: **{best.variant}** ({metric} = {best[metric]:.4f}, Δ = {best.delta_vs_ref:+.4f}, "
+                  f"veredito: {best.veredito}). Os próximos experimentos só adotam uma variante nova se ela "
+                  "superar a configuração vigente por mais que a margem; num empate, fica a vigente.", ""]
         plots.comparison_bars(list(s.variant), list(s[metric]), list(s[f"{metric}_std"].fillna(0)),
                               out / f"{exp}_{metric}.png", f"{exp}: {metric} na validação (média ± desvio entre folds)",
                               metric, ref=ref_val)

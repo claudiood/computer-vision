@@ -1,0 +1,29 @@
+# E5 — Aumento de dados: um fator por vez contra os padrões da Ultralytics.
+# Pergunta-guia: "essa variação aparece quando o modelo estiver em uso?"
+# As fotos são de celular, em perspectiva: sombra, sol forte e asfalto molhado
+# mudam muito a luz; o celular inclina um pouco e o ângulo com o chão varia.
+# Fora: flipud (céu embaixo não acontece), scale mais forte e no_aug (perderam na rodada anterior).
+# "padrão" é a melhor configuração do E1–E4, já treinada (referência).
+# Se duas ou mais variantes ganharem ("melhor" no compare.py), descomente a variante
+# `combo` no fim do arquivo com os valores delas e rode só ela:
+#   python scripts/run_experiment.py 05_augmentation --variants combo
+extends: ../base_train.yaml
+name: 05_augmentation
+description: aumento de dados (um fator por vez) na melhor config do E1-E4, fold 0
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe]
+folds: [0]
+seeds: [0]
+include_best:
+  padrão (E1-E4): [01_baseline, 02_models, 03_imgsz, 04_clahe]
+reference: padrão (E1-E4)
+variants:
+  luz_forte:                          # sombra, sol forte, asfalto molhado
+    train: {hsv_v: 0.6, hsv_s: 0.8}
+  geometria:                          # celular inclinado, ângulo com o chão
+    train: {degrees: 5.0, perspective: 0.0005}
+  mixup:                              # regularização: menos "decoreba" com poucas imagens
+    train: {mixup: 0.1}
+  close_mosaic_20:                    # mais épocas finais com imagens normais (sem mosaic)
+    train: {close_mosaic: 20}
+  # combo:                            # junte aqui as variantes que ganharam (exemplo)
+  #   train: {hsv_v: 0.6, hsv_s: 0.8, close_mosaic: 20}

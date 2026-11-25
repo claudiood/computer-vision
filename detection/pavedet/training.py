@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import time
 from pathlib import Path
 
@@ -32,7 +33,7 @@ def resolve_config(exp: dict, variant_cfg: dict | None = None, cli: dict | None 
         names = [inherit] if isinstance(inherit, str) else list(inherit)
         metric = cfg.get("selection_metric", "mAP50_95")
         entries = read_registry()
-        best = best_of(names, metric, entries)
+        best = best_of(names, metric, entries, margin=float(exp.get("adopt_margin", 0.0)))
         done = {e.get("experiment") for e in entries}
         missing = [n for n in names if n not in done]
         if missing:
@@ -47,9 +48,14 @@ def resolve_config(exp: dict, variant_cfg: dict | None = None, cli: dict | None 
             best_cfg.pop("data", None)
             cfg = deep_merge(cfg, best_cfg)
             cfg["_inherited"] = f"{name}:{var}"
+    base_model = str(cfg.get("model", ""))
     cfg = deep_merge(cfg, exp.get("overrides") or {})
     cfg = deep_merge(cfg, variant_cfg or {})
     cfg = deep_merge(cfg, cli or {})
+    # "{family}s.pt" = mesma família do modelo herdado (yolo26n.pt → yolo26s.pt; yolo11n.pt → yolo11s.pt)
+    if "{family}" in str(cfg.get("model", "")):
+        family = re.sub(r"[nsmlx]?\.(pt|yaml)$", "", Path(base_model).name)
+        cfg["model"] = str(cfg["model"]).replace("{family}", family)
     if cfg.get("train", {}).get("epochs") == "cv_median":
         cfg["train"]["epochs"] = cv_median_epochs(allow_missing)
     return cfg

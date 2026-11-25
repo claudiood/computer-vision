@@ -8,7 +8,9 @@
 #   device            auto (cuda > mps > cpu), 0, mps, cpu
 #   selection_metric  métrica usada para escolher a melhor variante de cada experimento
 #   op_conf           limiar de confiança do "ponto de operação" (P_op/R_op/F1_op)
-#   oversample        estratégia contra desbalanceamento (null = desligado); escolhida pelo Optuna (E5)
+#   oversample        estratégia contra desbalanceamento (null = desligado)
+#   adopt_margin      margem para adotar uma mudança: a nova configuração só substitui a vigente
+#                     se o mAP50-95 subir MAIS que isso (abaixo disso é ruído, fica a mais simples)
 #   train             argumentos repassados a model.train() da Ultralytics
 
 dataset: pavement_v3
@@ -16,14 +18,15 @@ data: fold0
 model: yolo26n.pt
 device: auto
 selection_metric: mAP50_95   # o mesmo critério que a Ultralytics usa para salvar o best.pt
+adopt_margin: 0.015          # ruído medido entre seeds iguais na rodada anterior
 op_conf: 0.25
 oversample: null
 
 train:
   epochs: 100          # teto; o early stopping (patience) decide onde parar
   patience: 25         # na rodada anterior a melhor época ficou entre 20 e 70
-  imgsz: 960           # E3 testa 1280
-  batch: 8             # o MESMO batch em todos os experimentos (cabe 26s a 1280 na A6000)
+  imgsz: 960           # E3 testa 1280 e 1600
+  batch: 8             # o MESMO batch em todos os experimentos (se faltar memória com m a 1600: --set train.batch=4)
   optimizer: auto      # com auto, lr0 é ignorado; o Optuna fixa o otimizador
   seed: 0
   deterministic: true

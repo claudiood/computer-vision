@@ -1,17 +1,18 @@
-# E5 — Otimização de hiperparâmetros e aumento de dados com Optuna (scripts/tune_optuna.py).
+# E6 — Otimização dos hiperparâmetros de TREINO com Optuna (scripts/tune_optuna.py).
 #
-# A base é a melhor configuração entre os experimentos de `inherit_best`
-# (modelo, imgsz e CLAHE já decididos). O Optuna mexe no que ainda não foi
-# decidido: otimização, pesos da perda, aumento de dados e oversampling.
+# A base é a configuração vigente ao fim do E1–E5 (modelo, tamanho, resolução,
+# CLAHE e aumento de dados já decididos). O Optuna mexe só no que falta:
+# otimizador, taxa de aprendizado e pesos da perda. O aumento de dados vem antes
+# porque o melhor lr0 depende de quanto aumento existe.
 #
 # Objetivo: `selection_metric` na VALIDAÇÃO do fold 0. O teste nunca é usado aqui.
-# Como os trials olham só o fold 0, a ablação (E6) treina a melhor configuração
-# nos folds 0–2 antes de ela ser adotada: se não superar a configuração sem
-# Optuna, fica a sem Optuna.
+# Depois do estudo, o melhor trial é treinado por completo no E6b
+# (python scripts/run_experiment.py 06b_optuna_best) e só é adotado se superar a
+# configuração vigente por mais que a margem.
 
 study_name: hparams_v3
-inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe]
-experiment: 05_optuna           # nome no registro / pasta de resultados
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation]
+experiment: 06_optuna           # nome no registro / pasta de resultados
 n_trials: 12
 timeout_h: null                 # limite de tempo total (horas), opcional
 sampler: {type: tpe, seed: 42, n_startup_trials: 5}
@@ -20,28 +21,16 @@ sampler: {type: tpe, seed: 42, n_startup_trials: 5}
 pruner: {type: median, n_startup_trials: 5, n_warmup_steps: 15}
 
 # Trials mais curtos que o treino normal (o ranking entre configs costuma se
-# manter). A ablação (E6) treina a melhor com o número normal de épocas.
+# manter). O E6b treina o melhor com o número normal de épocas.
 trial_overrides:
   train: {epochs: 50, patience: 15, plots: false}
 
-# Espaço reduzido aos parâmetros que pesaram na rodada anterior (importâncias:
-# cls, lr0, close_mosaic, hsv_v, mosaic, degrees) mais os que faltavam testar
-# (translate, mixup, oversampling). lrf, momentum, weight_decay, warmup e cos_lr
-# tiveram importância perto de zero e ficam nos padrões.
+# Na rodada anterior, cls e lr0 foram de longe os mais importantes; momentum,
+# weight_decay, warmup e cos_lr tiveram importância perto de zero e ficam no padrão.
 search_space:
   # ATENÇÃO: com optimizer=auto a Ultralytics ignora lr0; por isso o otimizador é fixado.
   train.optimizer: {type: categorical, choices: [SGD, AdamW]}
   train.lr0: {type: float, low: 1.0e-4, high: 2.0e-2, log: true}
+  train.lrf: {type: float, low: 0.01, high: 0.3, log: true}
   train.box: {type: float, low: 5.0, high: 10.0}
   train.cls: {type: float, low: 0.3, high: 1.5}
-  # aumento de dados
-  train.scale: {type: float, low: 0.2, high: 0.8}
-  train.mosaic: {type: float, low: 0.5, high: 1.0}
-  train.close_mosaic: {type: int, low: 0, high: 25}
-  train.translate: {type: float, low: 0.0, high: 0.2}
-  train.hsv_v: {type: float, low: 0.2, high: 0.7}
-  train.degrees: {type: float, low: 0.0, high: 8.0}
-  train.mixup: {type: float, low: 0.0, high: 0.2}
-  # desbalanceamento: quantas vezes cada imagem com remendo (classe 1) entra por
-  # época. 1 = sem oversampling. Vira `oversample: {method: fixed, factors: {1: N}}`.
-  oversample.patch_factor: {type: categorical, choices: [1, 2, 3]}

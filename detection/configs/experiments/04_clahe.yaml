@@ -7,9 +7,9 @@
 # "Sem CLAHE" é a melhor configuração do E1–E3, já treinada (referência).
 extends: ../base_train.yaml
 name: 04_clahe
-description: CLAHE clipLimit 1.0 e 2.0 na melhor config do E1-E3, folds 0-2
+description: CLAHE clipLimit 1.0 e 2.0 na melhor config do E1-E3, fold 0
 inherit_best: [01_baseline, 02_models, 03_imgsz]
-folds: [0, 1, 2]
+folds: [0]
 seeds: [0]
 include_best:
   sem CLAHE (E1-E3): [01_baseline, 02_models, 03_imgsz]

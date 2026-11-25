@@ -5,7 +5,7 @@
 # os scripts funcionam de ponta a ponta, não mede desempenho.
 #
 # Uso (dentro da pasta detection/, com o ambiente virtual ativo):
-#   bash tests/smoke_test.sh            # completo (~15-25 min na CPU)
+#   bash tests/smoke_test.sh            # completo (~10-20 min na CPU)
 #   bash tests/smoke_test.sh --quick    # sem treinos (só dados e dry-runs)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -14,8 +14,6 @@ export PAVEDET_WORKDIR="$TMP/work"
 DS="$TMP/src/dataset.yaml"
 # configuração mínima para os treinos de teste
 FAST="device=cpu train.epochs=2 train.imgsz=160 train.batch=8 train.workers=0 train.plots=false train.patience=0 train.cache=false"
-# dois folds bastam para testar a comparação pareada
-F="--folds 0 1"
 step() { echo; echo "=================== $*"; }
 
 step "0. ambiente";            python scripts/00_check_env.py || true
@@ -33,18 +31,19 @@ step "5. dry-runs";            for e in 01 02; do python scripts/run_experiment.
 python scripts/run_experiment.py --list
 if [[ "${1:-}" == "--quick" ]]; then echo "OK (quick) — $TMP"; exit 0; fi
 
-step "E1. baseline";           python scripts/run_experiment.py 01_baseline $F --set $FAST
-step "E1b. de novo: deve PULAR as concluídas"; python scripts/run_experiment.py 01_baseline $F --set $FAST
-step "E2. modelos";            python scripts/run_experiment.py 02_models $F --set $FAST
+step "E1. baseline (yolo26n × yolo11n)"; python scripts/run_experiment.py 01_baseline --set $FAST
+step "E1b. de novo: deve PULAR as concluídas"; python scripts/run_experiment.py 01_baseline --set $FAST
+step "E2. tamanhos s e m da família vencedora"; python scripts/run_experiment.py 02_models --set $FAST
 python scripts/compare.py --experiments 02_models
-step "E3. imgsz (herda o melhor do E1/E2)"; python scripts/run_experiment.py 03_imgsz $F --set $FAST train.imgsz=192
-step "E4. CLAHE";              python scripts/run_experiment.py 04_clahe $F --set $FAST
-python scripts/compare.py --experiments 04_clahe
-step "E5. optuna (3 trials)"
+step "E3. imgsz";              python scripts/run_experiment.py 03_imgsz --set $FAST
+step "E4. CLAHE";              python scripts/run_experiment.py 04_clahe --set $FAST
+step "E5. aumento de dados";   python scripts/run_experiment.py 05_augmentation --variants luz_forte mixup --set $FAST
+python scripts/compare.py --experiments 05_augmentation
+step "E6. optuna (3 trials) + melhor trial com épocas normais"
 cat > "$TMP/optuna_test.yaml" <<EOF
 study_name: smoke
-inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe]
-experiment: 05_optuna
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation]
+experiment: 06_optuna
 n_trials: 3
 sampler: {type: tpe, seed: 1, n_startup_trials: 2}
 pruner: {type: median, n_startup_trials: 1, n_warmup_steps: 0}
@@ -52,25 +51,21 @@ trial_overrides: {train: {epochs: 2}}
 search_space:
   train.optimizer: {type: categorical, choices: [SGD, AdamW]}
   train.lr0: {type: float, low: 1.0e-4, high: 1.0e-2, log: true}
-  train.mixup: {type: float, low: 0.0, high: 0.2}
-  oversample.patch_factor: {type: categorical, choices: [1, 2, 3]}
+  train.cls: {type: float, low: 0.3, high: 1.5}
 EOF
 python scripts/tune_optuna.py --config "$TMP/optuna_test.yaml" --dry-run --set $FAST
 python scripts/tune_optuna.py --config "$TMP/optuna_test.yaml" --set $FAST
 python scripts/tune_optuna.py --config "$TMP/optuna_test.yaml" --report
-step "E6. ablação (variantes iguais à full são puladas)"
-python scripts/run_experiment.py 06_ablation $F --set $FAST
-python scripts/compare.py --experiments 06_ablation
-step "E7. validação cruzada (folds 3 e 4) + relatório"
+python scripts/run_experiment.py 06b_optuna_best --set $FAST
+step "E7. validação cruzada (folds 1 e 2) + relatório"
 python scripts/run_experiment.py 07_cv --set $FAST
-# no teste rápido os folds 0-2 do vencedor podem ter só 0 e 1: o relatório junta o que houver
 python scripts/cv_report.py
-step "E8. final (treino+validação, épocas da CV)"
-python scripts/run_experiment.py 08_final --seeds 0 1 --set device=cpu train.imgsz=160 train.batch=8 train.workers=0 train.plots=false train.cache=false
-step "resumo";                 python scripts/compare.py --experiments 01_baseline 02_models 03_imgsz 04_clahe 06_ablation --out resumo
-step "avaliação (val)";        python scripts/evaluate.py --best-of 06_ablation --bench 5
+step "E8. modelo final (treino, best.pt)"
+python scripts/run_experiment.py 08_final --set $FAST
+step "resumo";                 python scripts/compare.py --experiments 01_baseline 02_models 03_imgsz 04_clahe 05_augmentation 06b_optuna_best --out resumo
+step "avaliação (val)";        python scripts/evaluate.py --best-of 01_baseline --bench 5
 step "teste final";            python scripts/final_test.py --experiment 08_final --confirm --conf cv
 step "teste de novo sem --rerun: deve RECUSAR"
 if python scripts/final_test.py --experiment 08_final --confirm; then echo "FALHOU: o teste deveria estar bloqueado"; exit 1; fi
-step "predict";                python scripts/predict.py --run "$(ls -d $PAVEDET_WORKDIR/results/experiments/08_final/final_trainval/s0_ftrainval)" --source "$TMP/src/dataset/detection/images/IMG_1005.jpg"
+step "predict";                python scripts/predict.py --run "$(ls -d $PAVEDET_WORKDIR/results/experiments/08_final/final/s0_f0)" --source "$TMP/src/dataset/detection/images/IMG_1005.jpg"
 echo; echo "SMOKE TEST OK — saídas em $TMP"

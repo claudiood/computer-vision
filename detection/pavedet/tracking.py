@@ -112,12 +112,17 @@ def best_variant(experiment: str, metric: str, entries: list[dict] | None = None
     return best, runs[0]["config"], runs
 
 
-def best_of(experiments: str | list[str], metric: str, entries: list[dict] | None = None):
-    """Melhor variante entre VÁRIOS experimentos (média de `metric` entre as execuções da variante).
+def best_of(experiments: str | list[str], metric: str, entries: list[dict] | None = None,
+            margin: float = 0.0):
+    """Melhor configuração entre VÁRIOS experimentos, na ordem do pipeline.
+
+    Cada experimento é resumido pela sua melhor variante (média de `metric` entre as execuções).
+    Os experimentos são percorridos em ordem: a configuração vigente só é trocada se a nova
+    superar a vigente por MAIS de `margin`. Assim, uma diferença menor que o ruído não muda
+    a escolha, e fica a opção que já estava (a mais simples/barata, testada antes).
 
     Retorna (score, experimento, variante, config da melhor execução, execuções da variante)
-    ou None se nenhum dos experimentos tem execuções concluídas. Usado pela herança
-    `inherit_best`, pelo `include_best` do compare.py e pelo cv_report.py.
+    ou None se nenhum dos experimentos tem execuções concluídas.
     """
     entries = entries if entries is not None else read_registry()
     best = None
@@ -127,6 +132,6 @@ def best_of(experiments: str | list[str], metric: str, entries: list[dict] | Non
         except SystemExit:
             continue
         score = float(np.mean([r["metrics"][metric] for r in runs]))
-        if best is None or score > best[0]:
+        if best is None or score > best[0] + margin:
             best = (score, name, var, cfg, runs)
     return best
