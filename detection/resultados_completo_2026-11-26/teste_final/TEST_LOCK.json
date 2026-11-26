@@ -1,0 +1,12 @@
+[
+  {
+    "when": "2026-11-26 05:21:17",
+    "experiment": "08_final",
+    "runs": [
+      "/home/shadeform/computer-vision/detection/results/experiments/08_final/final_trainval/s0_ftrainval",
+      "/home/shadeform/computer-vision/detection/results/experiments/08_final/final_trainval/s1_ftrainval",
+      "/home/shadeform/computer-vision/detection/results/experiments/08_final/final_trainval/s2_ftrainval"
+    ],
+    "report": "/home/shadeform/computer-vision/detection/results/final/08_final_20261126-052056/test_report.md"
+  }
+]

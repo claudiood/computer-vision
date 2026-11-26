@@ -1,0 +1,8 @@
+best_value: 0.20817714471701768
+best_trial: 5
+params:
+  train.optimizer: SGD
+  train.lr0: 0.011883992712911113
+  train.lrf: 0.010260022325256584
+  train.box: 5.470710727337247
+  train.cls: 1.3270770489663135

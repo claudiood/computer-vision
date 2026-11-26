@@ -1,0 +1,170 @@
+{
+  "status": "completed",
+  "experiment": "08_final",
+  "variant": "final_trainval",
+  "seed": 0,
+  "fold": "trainval",
+  "run_dir": "/home/shadeform/computer-vision/detection/results/experiments/08_final/final_trainval/s0_ftrainval",
+  "config": {
+    "dataset": "pavement_v3",
+    "data": "trainval",
+    "model": "yolo26n.pt",
+    "device": "auto",
+    "selection_metric": "mAP50_95",
+    "op_conf": 0.25,
+    "oversample": null,
+    "train": {
+      "epochs": 74,
+      "patience": 0,
+      "imgsz": 960,
+      "batch": 8,
+      "optimizer": "auto",
+      "seed": 0,
+      "deterministic": true,
+      "workers": 10,
+      "cache": "disk",
+      "amp": true,
+      "plots": true,
+      "val": true,
+      "mosaic": 1.0,
+      "close_mosaic": 10,
+      "scale": 0.5,
+      "translate": 0.1,
+      "degrees": 0.0,
+      "shear": 0.0,
+      "perspective": 0.0,
+      "hsv_h": 0.015,
+      "hsv_s": 0.7,
+      "hsv_v": 0.4,
+      "fliplr": 0.5,
+      "flipud": 0.0,
+      "mixup": 0.0,
+      "cutmix": 0.0
+    },
+    "_inherited": "01_baseline:yolo26n"
+  },
+  "data_yaml": "/home/shadeform/computer-vision/detection/data/pavement_v3/data_trainval.yaml",
+  "device": "0",
+  "env": {
+    "python": "3.10.12",
+    "platform": "Linux-6.8.0-149-generic-x86_64-with-glibc2.35",
+    "machine": "x86_64",
+    "cpu_count": 12,
+    "torch": "2.14.1+cu130",
+    "cuda": true,
+    "gpu": "NVIDIA RTX A6000",
+    "gpu_mem_gb": 50.9,
+    "mps": false,
+    "ultralytics": "8.4.219",
+    "ram_gb": 67.5,
+    "git": {
+      "commit": "b462e85",
+      "dirty": true
+    }
+  },
+  "started": "2026-11-26 05:10:11",
+  "train_time_s": 207.2,
+  "gpu_peak_mb": 2897.9,
+  "epochs_run": 74,
+  "best_epoch": 71,
+  "train_time_csv_s": 195.122,
+  "weights": {
+    "best": "/home/shadeform/computer-vision/detection/results/experiments/08_final/final_trainval/s0_ftrainval/weights/best.pt",
+    "last": "/home/shadeform/computer-vision/detection/results/experiments/08_final/final_trainval/s0_ftrainval/weights/last.pt",
+    "best_size_mb": 5.5
+  },
+  "metrics": {
+    "P": 0.8207927593175796,
+    "R": 0.8202071825365128,
+    "mAP50": 0.8953781454899644,
+    "mAP50_95": 0.6328823103472693,
+    "fitness": 0.6328823103472693,
+    "F1": 0.8163449051928021,
+    "best_conf": 0.22122122122122123,
+    "per_class": {
+      "rachadura": {
+        "instances": 98,
+        "P": 0.8626043790578892,
+        "R": 0.7047090689194081,
+        "F1": 0.7757033280052537,
+        "mAP50": 0.8500731388966366,
+        "mAP50_95": 0.6095460658106309,
+        "P_op": 0.8375,
+        "R_op": 0.6836734693877551,
+        "F1_op": 0.752808988764045,
+        "TP": 67,
+        "FP": 13,
+        "FN": 31
+      },
+      "remendo": {
+        "instances": 38,
+        "P": 0.793722023103607,
+        "R": 0.9114680342456856,
+        "F1": 0.8485297565719512,
+        "mAP50": 0.9462249345029322,
+        "mAP50_95": 0.7364872513892131,
+        "P_op": 0.8648648648648649,
+        "R_op": 0.8421052631578947,
+        "F1_op": 0.8533333333333334,
+        "TP": 32,
+        "FP": 5,
+        "FN": 6
+      },
+      "buraco": {
+        "instances": 90,
+        "P": 0.8060518757912427,
+        "R": 0.8444444444444444,
+        "F1": 0.8248016310012016,
+        "mAP50": 0.8898363630703243,
+        "mAP50_95": 0.5526136138419642,
+        "P_op": 0.8539325842696629,
+        "R_op": 0.8444444444444444,
+        "F1_op": 0.8491620111731844,
+        "TP": 76,
+        "FP": 13,
+        "FN": 14
+      }
+    },
+    "speed_ms": {
+      "preprocess": 1.348,
+      "inference": 5.923,
+      "loss": 0.001,
+      "postprocess": 1.006
+    },
+    "P_op": 0.8520991497115092,
+    "R_op": 0.7900743923300314,
+    "F1_op": 0.8184347777568542,
+    "P_op_micro": 0.8495145631067961,
+    "R_op_micro": 0.7743362831858407,
+    "F1_op_micro": 0.8101851851851851,
+    "op_conf": 0.25,
+    "confusion_matrix_op": [
+      [
+        67,
+        0,
+        0,
+        13
+      ],
+      [
+        0,
+        32,
+        0,
+        5
+      ],
+      [
+        0,
+        0,
+        76,
+        13
+      ],
+      [
+        31,
+        6,
+        14,
+        0
+      ]
+    ]
+  },
+  "peak_rss_mb": 5100.4,
+  "finished": "2026-11-26 05:13:43"
+}
