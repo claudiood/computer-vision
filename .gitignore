@@ -4,3 +4,4 @@ results/
 *.pt
 *.cache
 .venv/
+imagens/
