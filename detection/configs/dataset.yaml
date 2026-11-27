@@ -31,7 +31,7 @@ clean:
 
 prepare:
   name: pavement_v3    # nome da versão do dataset preparado (data/<name>/): nova rotulação
-  max_side: 1600       # = maior imgsz testado (1600). Imagens menores = leitura e cache mais rápidos
+  max_side: 1280       # = maior imgsz testado (1280). Imagens menores = leitura e cache mais rápidos
   jpeg_quality: 95
   test_fraction: 0.15  # teste fixo, usado UMA vez no fim
   folds: 3             # folds sobre o restante: o fold 0 decide tudo; os 3 juntos = validação cruzada final

@@ -1,15 +1,13 @@
-# E8 — Treino definitivo com a configuração vencedora, em TREINO + VALIDAÇÃO
-# (todas as imagens menos o teste). Como não sobra validação independente, o
-# número de épocas é fixo: a mediana da melhor época da validação cruzada (E7),
-# lida de results/cv/cv_summary.json (rode scripts/cv_report.py antes).
-# patience: 0 desliga o early stopping. Vale o modelo da última época (last.pt).
-# 3 seeds: o resultado no teste é a MÉDIA ± desvio, não o melhor seed.
+# E8 — Modelo final: a configuração vencedora treinada no conjunto de TREINO
+# (com a validação do fold 0 acompanhando o treino e o early stopping), como no
+# manual. O modelo final é o best.pt.
 # Avaliação no teste (uma vez):
 #   python scripts/final_test.py --experiment 08_final --confirm --conf cv
 extends: ../base_train.yaml
 name: 08_final
-description: config vencedora em treino+validação, épocas da CV, 3 seeds (teste UMA vez)
-inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation, 06b_optuna_best]
-seeds: [0, 1, 2]
+description: config vencedora no treino (fold 0), best.pt; teste UMA vez
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation, 05b_freeze, 06b_optuna_best]
+folds: [0]
+seeds: [0]
 variants:
-  final_trainval: {data: trainval, train: {epochs: cv_median, patience: 0}}
+  final: {}

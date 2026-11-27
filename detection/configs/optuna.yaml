@@ -1,7 +1,7 @@
 # E6 — Otimização dos hiperparâmetros de TREINO com Optuna (scripts/tune_optuna.py).
 #
-# A base é a configuração vigente ao fim do E1–E5 (modelo, tamanho, resolução,
-# CLAHE e aumento de dados já decididos). O Optuna mexe só no que falta:
+# A base é a configuração vigente ao fim do E1–E5b (modelo, tamanho, resolução,
+# CLAHE, aumento de dados e freeze já decididos). O Optuna mexe só no que falta:
 # otimizador, taxa de aprendizado e pesos da perda. O aumento de dados vem antes
 # porque o melhor lr0 depende de quanto aumento existe.
 #
@@ -11,7 +11,7 @@
 # configuração vigente por mais que a margem.
 
 study_name: hparams_v3
-inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation]
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation, 05b_freeze]
 experiment: 06_optuna           # nome no registro / pasta de resultados
 n_trials: 12
 timeout_h: null                 # limite de tempo total (horas), opcional

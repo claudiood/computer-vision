@@ -39,10 +39,11 @@ step "E3. imgsz";              python scripts/run_experiment.py 03_imgsz --set $
 step "E4. CLAHE";              python scripts/run_experiment.py 04_clahe --set $FAST
 step "E5. aumento de dados";   python scripts/run_experiment.py 05_augmentation --variants luz_forte mixup --set $FAST
 python scripts/compare.py --experiments 05_augmentation
+step "E5b. freeze";           python scripts/run_experiment.py 05b_freeze --variants freeze10 --set $FAST
 step "E6. optuna (3 trials) + melhor trial com épocas normais"
 cat > "$TMP/optuna_test.yaml" <<EOF
 study_name: smoke
-inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation]
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation, 05b_freeze]
 experiment: 06_optuna
 n_trials: 3
 sampler: {type: tpe, seed: 1, n_startup_trials: 2}
@@ -62,10 +63,11 @@ python scripts/run_experiment.py 07_cv --set $FAST
 python scripts/cv_report.py
 step "E8. modelo final (treino, best.pt)"
 python scripts/run_experiment.py 08_final --set $FAST
-step "resumo";                 python scripts/compare.py --experiments 01_baseline 02_models 03_imgsz 04_clahe 05_augmentation 06b_optuna_best --out resumo
+step "resumo";                 python scripts/compare.py --experiments 01_baseline 02_models 03_imgsz 04_clahe 05_augmentation 05b_freeze 06b_optuna_best --out resumo
 step "avaliação (val)";        python scripts/evaluate.py --best-of 01_baseline --bench 5
 step "teste final";            python scripts/final_test.py --experiment 08_final --confirm --conf cv
 step "teste de novo sem --rerun: deve RECUSAR"
 if python scripts/final_test.py --experiment 08_final --confirm; then echo "FALHOU: o teste deveria estar bloqueado"; exit 1; fi
+step "exportação do relatório"; python scripts/export_report.py --out "$TMP/relatorio"
 step "predict";                python scripts/predict.py --run "$(ls -d $PAVEDET_WORKDIR/results/experiments/08_final/final/s0_f0)" --source "$TMP/src/dataset/detection/images/IMG_1005.jpg"
 echo; echo "SMOKE TEST OK — saídas em $TMP"

@@ -4,7 +4,9 @@ Este roteiro cobre o pipeline para treinar um detector de três classes de dano 
 
 Esta é a versão para a **nova rotulação** (`pavement_v3`). A rodada anterior (`pavement_v2`, resultados em `resultados_enxuta_2026-11-22/`) foi descartada: várias imagens sem anotação tinham danos visíveis e o critério de anotação mudava entre as pessoas. Os números daquela rodada não são comparáveis com os desta.
 
-Orçamento: **cerca de 3 a 4 horas** numa A6000 com 6 vCPUs, se vencer um modelo n ou s a 960/1280 (seção 6).
+Esta é a **última rodada**. Mudanças em relação à rodada de 26/11: rótulos padronizados (seção 1.1), teto de 150 épocas, E3 só com 1280, novo E5b (congelar camadas, contra o overfitting), medida de overfitting treino × validação na CV e o script `export_report.py`, que junta tudo o que vai para o relatório.
+
+Orçamento: **cerca de 3 a 3,5 horas** numa A6000 com 6 vCPUs, se vencer um modelo n ou s a 960 (seção 6).
 
 ---
 
@@ -23,6 +25,7 @@ Regras gerais:
 - Anote **todos** os danos visíveis da imagem. Dano sem caixa vira erro na avaliação.
 - Danos muito pequenos ou ilegíveis ficam de fora, do mesmo jeito para todo mundo.
 - **Imagem sem `.txt` entra como fundo** (imagem sem dano, `unlabeled_policy: background`). Por isso, toda imagem com dano visível precisa ter `.txt`: uma foto com dano e sem anotação ensina o modelo a ignorar o dano, e um acerto nela conta como falso positivo. Se não der para anotar, liste-a em `exclude` no `configs/dataset.yaml`.
+- **Uma caixa por área contínua**: rachaduras que se sobrepõem ou se encostam (couro de jacaré) viram uma caixa só; caixas da mesma classe nunca ficam uma dentro da outra. Os rótulos de 26/11 foram padronizados assim por script (62 imagens; os originais estão em `dataset/detection/labels_antes_padronizacao/`).
 - Ao exportar do Make Sense, confira se a ordem do `labels.txt` continua `rachadura, remendo, buraco`.
 
 ### 1.2 Preparo (`configs/dataset.yaml`)
@@ -33,7 +36,7 @@ Regras gerais:
 | `unlabeled_policy` | `background` | Decisão do grupo: imagens sem `.txt` entram como imagens sem dano |
 | `grouping` | tudo em `0` (desligado) | Decisão do grupo: divisão por imagem, sem agrupar fotos da mesma cena |
 | `prepare.name` | `pavement_v3` | Versão nova: divisão e manifesto novos |
-| `prepare.max_side` | `1600` | Igual ao maior `imgsz` testado: o 1600 não fica só ampliado, e as imagens são menores que as fotos de 12 MP |
+| `prepare.max_side` | `1280` | Igual ao maior `imgsz` testado; imagens menores que as fotos de 12 MP são mais rápidas de ler |
 | `prepare.folds` | `3` | O fold 0 decide tudo; os 3 juntos formam a validação cruzada do final |
 
 Divisão: teste fixo de 15% (usado **uma vez**, no fim) e 3 folds sobre o resto, estratificados por classe e por anotador. Cada fold de validação tem cerca de 50 imagens.
@@ -52,7 +55,7 @@ detection/
 │   ├── optuna.yaml              E6: espaço de busca e configuração do estudo
 │   └── experiments/
 │       01_baseline.yaml  02_models.yaml  03_imgsz.yaml  04_clahe.yaml
-│       05_augmentation.yaml  06b_optuna_best.yaml  07_cv.yaml  08_final.yaml
+│       05_augmentation.yaml  05b_freeze.yaml  06b_optuna_best.yaml  07_cv.yaml  08_final.yaml
 ├── pavedet/                     funções reutilizáveis
 │   ├── config.py                YAML, herança (extends), overrides (--set chave=valor)
 │   ├── io_utils.py              imagens (HEIC/EXIF), rótulos YOLO, limpeza, dHash
@@ -67,7 +70,7 @@ detection/
 │   └── env.py                   device, versões, memória
 ├── scripts/
 │   00_check_env.py  01_audit_dataset.py  02_prepare_dataset.py  03_validate_dataset.py
-│   run_experiment.py  tune_optuna.py  compare.py  cv_report.py
+│   run_experiment.py  tune_optuna.py  compare.py  cv_report.py  export_report.py
 │   evaluate.py  final_test.py  predict.py  train.py (treino avulso)
 ├── tests/                       dataset sintético e smoke_test.sh
 ├── splits/pavement_v3.csv       manifesto da divisão (VERSIONADO: a mesma divisão para todo o grupo)
@@ -119,14 +122,15 @@ Para forçar outra escolha (por exemplo, preferir um modelo mais leve), passe-a 
 | E0 | Ambiente, auditoria, preparo, validação dos dados | — | — |
 | E1 | Linha de base: família | yolo26n × yolo11n (960, padrões) | 2 |
 | E2 | Tamanho | s e m da família vencedora (o n vem do E1) | 2 |
-| E3 | Resolução | 1280 e 1600 no melhor modelo (o 960 vem de antes) | 2 |
+| E3 | Resolução | 1280 no melhor modelo (o 960 vem de antes) | 1 |
 | E4 | CLAHE | clipLimit 1.0 e 2.0 | 2 |
 | E5 | Aumento de dados | luz forte, geometria, mixup, close_mosaic 20 | 4 (+1 combinação opcional) |
+| E5b | Congelar camadas (contra overfitting) | `freeze` 10 e 20 | 2 |
 | E6 | Optuna (hiperparâmetros de treino) | otimizador, lr0, lrf, box, cls | 12 trials + 1 (E6b) |
 | E7 | Validação cruzada (3 folds) | vencedora nos folds 1 e 2 (fold 0 já existe) | 2 |
-| E8 | Final + teste | treino+validação, épocas da CV, 3 seeds; teste uma vez | 3 |
+| E8 | Final + teste | vencedora treinada no treino (fold 0), `best.pt`; teste uma vez | 1 |
 
-Cerca de **30 treinos**. Depois de cada experimento: `python scripts/compare.py --experiments <nome>`.
+Cerca de **29 treinos**. No fim, `python scripts/export_report.py` junta os resultados numa pasta só (seção 4, E9). Depois de cada experimento: `python scripts/compare.py --experiments <nome>`.
 
 ### E0 — Ambiente e dados
 
@@ -174,9 +178,10 @@ python scripts/compare.py --experiments 02_models
 
 | | |
 |---|---|
-| Variantes | `imgsz_1280` e `imgsz_1600` no melhor modelo do E1/E2 (o 960 entra como referência) |
+| Variantes | `imgsz_1280` no melhor modelo do E1/E2 (o 960 entra como referência) |
 | Por quê | Rachaduras finas e buracos pequenos somem em resoluções menores; as fotos têm até 12 MP. Foi o único ganho consistente da rodada anterior (640 → 960). |
-| Custo | O 1280 leva cerca de 1,8 vez o tempo do 960; o 1600, cerca de 2,8 vezes. Se faltar memória com o m a 1600: `--set train.batch=4`. |
+| Custo | O 1280 leva cerca de 1,8 vez o tempo do 960. Se faltar memória: `--set train.batch=4`. |
+| Por que não 1600 | Perdeu na rodada de 26/11, é o treino mais caro e as fotos não ganham detalhe acima de 1280. |
 
 ```bash
 python scripts/run_experiment.py 03_imgsz
@@ -217,14 +222,27 @@ python scripts/run_experiment.py 05_augmentation
 python scripts/compare.py --experiments 05_augmentation
 ```
 
+### E5b — Congelar camadas (contra o overfitting)
+
+| | |
+|---|---|
+| Variantes | `freeze10` e `freeze20` (congela as 10 ou 20 primeiras camadas); "sem freeze" entra como referência |
+| Por quê | Na rodada de 26/11 o modelo decorou o treino: modelos maiores e resoluções maiores pioraram. Congelar o começo da rede (pré-treinado no COCO) mantém as features genéricas, como bordas e texturas, e deixa menos parâmetros livres para decorar as ~100 imagens de treino. |
+| Ordem | Vem antes do Optuna porque o melhor `lr0` muda se parte da rede está congelada. |
+
+```bash
+python scripts/run_experiment.py 05b_freeze
+python scripts/compare.py --experiments 05b_freeze
+```
+
 ### E6 — Optuna (hiperparâmetros de treino)
 
 | | |
 |---|---|
-| Base | A configuração vigente ao fim do E1–E5 |
+| Base | A configuração vigente ao fim do E1–E5b |
 | Espaço de busca | `optimizer` (SGD/AdamW), `lr0`, `lrf`, `box`, `cls`. Na rodada anterior, `cls` e `lr0` foram de longe os mais importantes; momentum, weight decay, warmup e cos_lr ficaram perto de zero e ficam no padrão. |
 | Configuração | 12 trials, 50 épocas e paciência 15 por trial, poda pela mediana, no fold 0 |
-| E6b | O melhor trial é treinado de novo com 100 épocas (`06b_optuna_best`), para comparar de igual para igual com a vigente. Só é adotado se superar por mais de 0,015. |
+| E6b | O melhor trial é treinado de novo com o número normal de épocas (150) (`06b_optuna_best`), para comparar de igual para igual com a vigente. Só é adotado se superar por mais de 0,015. |
 
 ```bash
 python scripts/tune_optuna.py
@@ -237,8 +255,9 @@ python scripts/compare.py --experiments 06b_optuna_best
 
 | | |
 |---|---|
-| O que faz | Treina a configuração vigente ao fim do E1–E6 nos folds 1 e 2. O `cv_report.py` junta com o fold 0, já treinado. |
-| Saídas | `results/cv/cv_report.md`: mAP50-95, mAP50, P, R, F1 em **média ± desvio de 3 folds** (o número principal do relatório), por classe; a mediana da melhor época (usada no E8) e o limiar de confiança que maximiza o F1. |
+| O que faz | Treina a configuração vigente ao fim do E1–E6 (E5b incluído) nos folds 1 e 2. O `cv_report.py` junta com o fold 0, já treinado. |
+| Saídas | `results/cv/cv_report.md`: mAP50-95, mAP50, P, R, F1 em **média ± desvio de 3 folds** (mostra se o resultado é confiável), por classe, o limiar de confiança que maximiza o F1 (usado no teste) e a tabela de **overfitting**. |
+| Overfitting | O `best.pt` de cada fold é avaliado também nas imagens de **treino**. A diferença (mAP50 no treino − mAP50 na validação) mostra quanto o modelo decorou. Para pular essa avaliação: `--no-train-eval`. |
 | Leitura | O fold 0 participou de todas as decisões; os folds 1 e 2 não. Se a média deles ficar bem abaixo do fold 0, as escolhas se ajustaram demais ao fold 0 — registre isso no relatório. |
 
 ```bash
@@ -246,25 +265,45 @@ python scripts/run_experiment.py 07_cv
 python scripts/cv_report.py
 ```
 
-### E8 — Treino definitivo e teste
+### E8 — Modelo final e teste
 
 | | |
 |---|---|
-| Configuração | A vencedora, treinada em **treino + validação** (todas as imagens menos o teste), com o número de épocas fixo na mediana da melhor época da CV e sem early stopping. 3 seeds. |
-| Por quê | Cerca de 50% a mais de imagens que o treino de um fold, o que pesa num dataset deste tamanho. O número de épocas vem da CV porque não sobra validação independente. Vale o modelo da última época (`last.pt`). |
-| Teste | Usado **uma vez**. Resultado = média ± desvio das 3 seeds. O limiar do ponto de operação vem da CV (`--conf cv`), não do teste. |
+| Configuração | A vencedora, treinada no conjunto de **treino**, com a validação do fold 0 acompanhando o treino e o early stopping, como no manual. O modelo final é o `best.pt`. |
+| Teste | Usado **uma vez**. O limiar do ponto de operação vem da validação cruzada (`--conf cv`), não do teste. |
 
 ```bash
 python scripts/run_experiment.py 08_final
 python scripts/final_test.py --experiment 08_final --confirm --conf cv
 ```
 
-O `final_test.py` grava `results/final/TEST_LOCK.json` e recusa rodar de novo sem `--rerun` (que fica registrado no relatório). O modelo entregue é o da seed 0, com o caminho no `test_report.md`.
+O `final_test.py` grava `results/final/TEST_LOCK.json` e recusa rodar de novo sem `--rerun` (que fica registrado no relatório). O caminho do modelo entregue fica no `test_report.md`.
+
+Contra o overfitting, o modelo final já usa o early stopping e o `best.pt` (a melhor época na validação, não a última) e herda o `freeze` se o E5b o adotou. Diminuir o número de épocas não ajudaria: o `best.pt` já ignora as épocas depois da melhor.
+
+### E9 — Exportar os resultados para o relatório
+
+A pasta `results/` fica só na máquina de treino (fora do git) e é grande. No fim da rodada:
+
+```bash
+python scripts/export_report.py            # cria detection/relatorio_<data>/
+rsync -avz <usuario>@<maquina>:<caminho>/detection/relatorio_<data>/ ./relatorio/   # no seu computador
+```
+
+| Pasta | Conteúdo |
+|---|---|
+| `00_config/` | Configurações usadas e o `registry.jsonl` (todos os treinos) |
+| `01_comparacoes/` | Tabela e gráficos de cada etapa (`summary.md`), com o veredito melhor/pior/empate |
+| `02_optuna/` | Histórico, importâncias dos hiperparâmetros e melhores parâmetros |
+| `03_validacao_cruzada/` | `cv_report.md` (por fold, por classe e overfitting) e o `results.png` de cada fold |
+| `04_modelo_final/` | `results.png`, `labels.jpg`, curvas PR/F1/P/R, matrizes de confusão, `val_batch` real × previsto e `best.pt` |
+| `05_teste/` | Relatório do teste, curvas e matrizes no teste e as piores imagens |
+| `LEIAME.md` | Índice com os números principais |
 
 ### Uso do modelo em imagens novas
 
 ```bash
-python scripts/predict.py --run results/experiments/08_final/final_trainval/s0_ftrainval --source pasta_ou_imagem --conf <limiar da CV>
+python scripts/predict.py --run results/experiments/08_final/final/s0_f0 --source pasta_ou_imagem --conf <limiar da CV>
 ```
 
 ---
@@ -273,32 +312,29 @@ python scripts/predict.py --run results/experiments/08_final/final_trainval/s0_f
 
 | Onde | Épocas (teto) | Paciência (early stopping) |
 |---|---|---|
-| E1 a E5, E6b e E7 | 100 | 25 |
+| E1 a E5b, E6b, E7 e E8 | 150 | 25 |
 | Trials do Optuna (E6) | 50 | 15, com poda |
-| E8 (treino + validação) | mediana da melhor época da CV | 0 (sem early stopping) |
 
-Na prática, os treinos param antes do teto: na rodada anterior, a melhor época ficou entre 20 e 70.
+O teto subiu de 100 para 150 porque, na rodada de 26/11, vários treinos bateram em 100 ainda melhorando (melhor época 88 a 98). Quem para antes continua parando antes: o early stopping encerra 25 épocas depois da melhor, e o `best.pt` guarda a melhor.
 
 ---
 
 ## 6. Tempo estimado (A6000, 6 vCPUs)
 
-Tempo por treino a 960, a partir da rodada anterior: n ≈ 6 min, s ≈ 8 min, m ≈ 12 min. O 1280 leva cerca de 1,8 vez e o 1600 cerca de 2,8 vezes isso. As etapas E4 em diante usam o modelo e a resolução vencedores, então o total depende deles:
+Tempo por treino a 960, a partir das rodadas anteriores: n ≈ 3–6 min, s ≈ 5–8 min, m ≈ 7–12 min. O 1280 leva cerca de 1,8 vez isso. As etapas E4 em diante usam o modelo e a resolução vencedores, então o total depende deles:
 
 | Vencedor do E1–E3 | Total aproximado |
 |---|---|
-| n ou s a 960 | ~3 h |
-| n ou s a 1280 | ~4 h |
-| n ou s a 1600, ou m a 1280 | ~6 h |
-| m a 1600 | ~8 h |
+| n ou s a 960 | ~3–3,5 h |
+| n ou s a 1280, ou m a 960 | ~4–5 h |
+| m a 1280 | ~5–6 h |
 
-Já configurado para acelerar: `cache: disk` (a CPU não redecodifica o JPEG a cada época; o gargalo da rodada anterior era a CPU), `workers: 6`, `max_side: 1600` e o early stopping.
+Já configurado para acelerar: `cache: disk` (a CPU não redecodifica o JPEG a cada época; o gargalo da rodada anterior era a CPU), `workers: 6`, `max_side: 1280` e o early stopping.
 
 Se o tempo apertar:
 
 1. Optuna com menos trials: `python scripts/tune_optuna.py --n-trials 8`
 2. Aumento de dados só com 2 variantes: `--variants luz_forte close_mosaic_20`
-3. Final com 1 seed: `python scripts/run_experiment.py 08_final --seeds 0` (o teste fica sem desvio)
 
 Antes de começar, rode um treino curto para medir o tempo por época na máquina: `python scripts/train.py --name teste --set train.epochs=10`.
 
@@ -314,10 +350,11 @@ Antes de começar, rode um treino curto para medir o tempo por época na máquin
 | E3 | `run_experiment.py 03_imgsz` → `compare.py --experiments 03_imgsz` |
 | E4 | `run_experiment.py 04_clahe` → `compare.py --experiments 04_clahe` |
 | E5 | `run_experiment.py 05_augmentation` → `compare.py --experiments 05_augmentation` |
+| E5b | `run_experiment.py 05b_freeze` → `compare.py --experiments 05b_freeze` |
 | E6 | `tune_optuna.py` → `tune_optuna.py --report` → `run_experiment.py 06b_optuna_best` → `compare.py --experiments 06b_optuna_best` |
 | E7 | `run_experiment.py 07_cv` → `cv_report.py` |
 | E8 | `run_experiment.py 08_final` → `final_test.py --experiment 08_final --confirm --conf cv` |
-| Relatório | `compare.py --experiments 01_baseline 02_models 03_imgsz 04_clahe 05_augmentation 06b_optuna_best --out resumo` |
+| E9 | `export_report.py` → copiar a pasta `relatorio_<data>/` para o seu computador |
 
 ---
 
@@ -344,6 +381,7 @@ Referência: em datasets públicos grandes de pavimento (milhares de imagens), m
 | `python scripts/run_experiment.py 05_augmentation --variants luz_forte` | Só uma variante |
 | `python scripts/run_experiment.py 03_imgsz --set train.batch=4` | Muda um valor em todas as variantes |
 | `python scripts/train.py --name teste --set train.epochs=10` | Treino avulso, também registrado |
+| `python scripts/compare.py --experiments 01_baseline 02_models 03_imgsz 04_clahe 05_augmentation 05b_freeze 06b_optuna_best --out resumo` | Tabela única com todas as etapas |
 | `python scripts/evaluate.py --best-of 05_augmentation` | Avaliação detalhada na validação: matrizes, curvas, piores imagens, velocidade |
 | `bash tests/smoke_test.sh` | Teste do pipeline inteiro num dataset sintético, na CPU (sem tocar em `data/` e `results/`) |
 
@@ -357,13 +395,15 @@ O `evaluate.py` recusa o teste. O teste só é usado pelo `final_test.py`.
 - **Decisões num fold só:** cada escolha do E1 ao E6 usa o fold 0, com uma margem de 0,015 contra o ruído. A CV de 3 folds confere no fim, mas as escolhas podem ter se ajustado ao fold 0.
 - **Imagens sem anotação como fundo:** se alguma delas tiver dano, o modelo aprende a ignorá-lo e a avaliação conta o acerto como falso positivo.
 - **Divisão por imagem, sem agrupar a mesma cena:** há fotos do mesmo dano tiradas com segundos de diferença. Uma pode ficar no treino e outra na validação ou no teste; as métricas tendem a ficar acima do desempenho em ruas novas. O agrupamento pode ser religado em `configs/dataset.yaml` (`hash_threshold: 70`, `time_window_s: 30`, `seq_window: 2`).
-- **Rachadura:** mesmo com o guia, a extensão de uma rachadura é ambígua; espera-se mAP50-95 mais baixo nessa classe.
+- **Rachadura:** mesmo com o guia, a extensão de uma rachadura é ambígua; espera-se mAP50-95 mais baixo nessa classe. A padronização por script (caixas que se encostam viram uma) deixa algumas caixas de rachadura quase do tamanho da imagem em fotos muito rachadas.
+- **Overfitting:** com ~100 imagens de treino por fold, o modelo vai bem melhor no treino do que na validação; a tabela treino × validação do `cv_report.md` quantifica isso.
 
 ---
 
 ## 11. Pendências antes do primeiro treino
 
-1. Apagar os YAMLs que não fazem mais parte do pipeline: `configs/experiments/04_augmentation.yaml`, `05_imbalance.yaml`, `06_ablation.yaml`, `06b_optuna_confirm.yaml` e `07_ablation.yaml` (`git rm`).
-2. Apagar ou mover a pasta `results/` antiga da máquina de treino, se existir.
-3. Manter a mesma máquina e as mesmas versões em todos os experimentos.
-4. Rodar `bash tests/smoke_test.sh --quick` uma vez na máquina de treino.
+1. Na máquina de treino: `git pull` (código desta rodada e rótulos padronizados).
+2. Apagar os YAMLs que não fazem mais parte do pipeline, se ainda existirem: `configs/experiments/04_augmentation.yaml`, `05_imbalance.yaml`, `06_ablation.yaml`, `06b_optuna_confirm.yaml` e `07_ablation.yaml` (`git rm`).
+3. Apagar a pasta `results/` e os datasets preparados antigos da máquina de treino (`rm -rf results data/pavement_v3*`), para não misturar com a rodada anterior nem reaproveitar cache com rótulos velhos.
+4. Manter a mesma máquina e as mesmas versões em todos os experimentos.
+5. Rodar `bash tests/smoke_test.sh --quick` uma vez na máquina de treino.

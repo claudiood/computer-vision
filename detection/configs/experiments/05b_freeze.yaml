@@ -1,0 +1,19 @@
+# E5b — Congelar as primeiras camadas (freeze), contra o overfitting.
+# Com ~100 imagens de treino por fold, o modelo decora o treino. Congelar as
+# primeiras camadas (o "backbone", pré-treinado no COCO) mantém as features
+# genéricas (bordas, texturas) e treina só o resto da rede: menos parâmetros
+# livres para decorar. freeze: N congela as N primeiras camadas da Ultralytics.
+# Vem antes do Optuna porque o melhor lr0 muda se parte da rede está congelada.
+# "sem freeze" é a melhor configuração do E1–E5, já treinada (referência).
+extends: ../base_train.yaml
+name: 05b_freeze
+description: freeze 10 e 20 na melhor config do E1-E5, fold 0
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation]
+folds: [0]
+seeds: [0]
+include_best:
+  sem freeze (E1-E5): [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation]
+reference: sem freeze (E1-E5)
+variants:
+  freeze10: {train: {freeze: 10}}
+  freeze20: {train: {freeze: 20}}

@@ -23,10 +23,11 @@ op_conf: 0.25
 oversample: null
 
 train:
-  epochs: 100          # teto; o early stopping (patience) decide onde parar
-  patience: 25         # na rodada anterior a melhor época ficou entre 20 e 70
-  imgsz: 960           # E3 testa 1280 e 1600
-  batch: 8             # o MESMO batch em todos os experimentos (se faltar memória com m a 1600: --set train.batch=4)
+  epochs: 150          # teto; o early stopping (patience) decide onde parar. Na rodada de 26/11
+                       # vários treinos bateram no teto de 100 ainda melhorando (melhor época 88-98)
+  patience: 25         # para 25 épocas depois da melhor; quem para antes não gasta nada a mais
+  imgsz: 960           # E3 testa 1280
+  batch: 8             # o MESMO batch em todos os experimentos (se faltar memória: --set train.batch=4)
   optimizer: auto      # com auto, lr0 é ignorado; o Optuna fixa o otimizador
   seed: 0
   deterministic: true

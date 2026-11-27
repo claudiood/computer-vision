@@ -1,17 +1,17 @@
 # E6b — O melhor trial do Optuna (E6), treinado com o número normal de épocas no fold 0.
 # Os trials do Optuna são mais curtos (50 épocas): para comparar de igual para igual
-# com a configuração vigente (100 épocas), o melhor trial é treinado de novo aqui.
+# com a configuração vigente (150 épocas), o melhor trial é treinado de novo aqui.
 # Ele só é adotado (no E7 e no E8) se superar a vigente por mais que a margem.
 extends: ../base_train.yaml
 name: 06b_optuna_best
-description: melhor trial do Optuna com 100 épocas, fold 0
+description: melhor trial do Optuna com o número normal de épocas, fold 0
 inherit_best: 06_optuna
 folds: [0]
 seeds: [0]
 overrides:
-  train: {epochs: 100, patience: 25, plots: true}
+  train: {epochs: 150, patience: 25, plots: true}
 include_best:
-  vigente (E1-E5): [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation]
-reference: vigente (E1-E5)
+  vigente (E1-E5b): [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation, 05b_freeze]
+reference: vigente (E1-E5b)
 variants:
   best_trial: {}

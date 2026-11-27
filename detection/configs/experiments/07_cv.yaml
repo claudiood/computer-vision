@@ -3,11 +3,12 @@
 # folds 1 e 2 (que não participaram de nenhuma decisão). O relatório junta os 3:
 #   python scripts/cv_report.py
 # Ele dá o número principal do relatório (média ± desvio em 3 folds), a mediana
-# da melhor época (usada no E8) e o limiar de confiança que maximiza o F1.
+# da melhor época, o limiar de confiança que maximiza o F1 e a diferença
+# treino × validação de cada fold (medida de overfitting).
 extends: ../base_train.yaml
 name: 07_cv
 description: config vencedora nos folds 1 e 2 (o fold 0 já existe)
-inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation, 06b_optuna_best]
+inherit_best: [01_baseline, 02_models, 03_imgsz, 04_clahe, 05_augmentation, 05b_freeze, 06b_optuna_best]
 folds: [1, 2]
 seeds: [0]
 variants:

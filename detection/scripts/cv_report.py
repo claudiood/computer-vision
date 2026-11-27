@@ -6,17 +6,23 @@ fim do `inherit_best` do 07_cv.yaml). O fold 0 vem do experimento de onde ela sa
 os folds 1 e 2, do 07_cv. O script confere que as configurações são iguais antes
 de juntar.
 
+Também avalia o best.pt de cada fold nas imagens de TREINO e mostra a diferença
+treino × validação: é a medida direta de overfitting (quanto o modelo vai melhor
+no que já viu do que no que não viu).
+
 Saída em results/cv/:
-  cv_summary.json   média ± desvio (3 folds), mediana da melhor época (usada no E8)
-                    e o limiar de confiança que maximiza o F1 (mediana entre folds)
-  cv_report.md      tabela por fold e por classe (vai para o relatório)
+  cv_summary.json   média ± desvio (3 folds), mediana da melhor época, limiar de
+                    confiança que maximiza o F1 e a diferença treino × validação
+  cv_report.md      tabelas por fold, por classe e de overfitting (vai para o relatório)
   cv_runs.csv       uma linha por fold
 
 Uso:
   python scripts/cv_report.py
+  python scripts/cv_report.py --no-train-eval     # pula a avaliação no treino (sem GPU, mais rápido)
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -40,7 +46,30 @@ def comparable(cfg: dict) -> str:
     return json.dumps(c, sort_keys=True, default=str)
 
 
+def eval_on_train(e: dict, out_dir: Path) -> dict:
+    """mAP do best.pt de um fold nas imagens de TREINO desse fold."""
+    from ultralytics import YOLO
+
+    from pavedet.env import free_memory, resolve_device
+    from pavedet.metrics import extract
+
+    from pavedet.training import data_yaml_path
+
+    model = YOLO(e["weights"]["best"])
+    tr = e["config"]["train"]
+    # data.yaml do fold, sem oversampling (cada imagem de treino conta uma vez)
+    dm = model.val(data=str(data_yaml_path(e["config"])), split="train", imgsz=tr.get("imgsz", 640), batch=tr.get("batch", 8),
+                   device=resolve_device(e.get("device")), plots=False, verbose=False,
+                   project=str(out_dir), name=f"fold{e['fold']}", exist_ok=True)
+    m = extract(dm, list(model.names.values()))
+    free_memory()
+    return {"mAP50": m["mAP50"], "mAP50_95": m["mAP50_95"]}
+
+
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--no-train-eval", action="store_true", help="não avalia os modelos nas imagens de treino")
+    args = ap.parse_args()
     exp_cv = load_experiment(CONFIG_DIR / "experiments" / "07_cv.yaml")
     registry = read_registry()
     metric = exp_cv.get("selection_metric", "mAP50_95")
@@ -70,8 +99,24 @@ def main() -> None:
     per_fold = df.groupby("fold").mean(numeric_only=True)
     main_cols = [c for c in ["mAP50_95", "mAP50", "P", "R", "F1", "F1_op", "best_conf"] if c in per_fold]
     cls_cols = sorted(c for c in per_fold.columns if "__" in c and c.split("__")[0] in ("mAP50", "mAP50_95", "F1"))
+    out = RESULTS_DIR / "cv"
+    out.mkdir(parents=True, exist_ok=True)
+    over = []
+    if not args.no_train_eval:
+        for e in runs:
+            try:
+                t = eval_on_train(e, out / "train_eval")
+            except Exception as ex:  # pesos ausentes (ex.: registro copiado de outra máquina)
+                print(f"AVISO: não deu para avaliar o fold {e['fold']} no treino: {type(ex).__name__}: {ex}")
+                continue
+            v = e["metrics"]
+            over.append({"fold": str(e["fold"]), "train_mAP50": t["mAP50"], "val_mAP50": v["mAP50"],
+                         "gap_mAP50": t["mAP50"] - v["mAP50"], "train_mAP50_95": t["mAP50_95"],
+                         "val_mAP50_95": v["mAP50_95"], "gap_mAP50_95": t["mAP50_95"] - v["mAP50_95"]})
     summary = {
         "config_from": f"{src_exp}/{src_var}",
+        "runs": {str(e["fold"]): e["run_dir"] for e in runs},
+        "overfitting": over,
         "folds": list(per_fold.index),
         "n_folds": int(len(per_fold)),
         "metrics": {c: {"mean": float(per_fold[c].mean()), "std": float(per_fold[c].std(ddof=1))}
@@ -80,8 +125,6 @@ def main() -> None:
         "best_conf_median": float(np.median(per_fold["best_conf"].dropna())) if "best_conf" in per_fold else None,
         "config": {k: src_cfg.get(k) for k in KEYS},
     }
-    out = RESULTS_DIR / "cv"
-    out.mkdir(parents=True, exist_ok=True)
     df.to_csv(out / "cv_runs.csv", index=False)
     (out / "cv_summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False, default=str),
                                          encoding="utf-8")
@@ -96,7 +139,17 @@ def main() -> None:
     L += ["", "## Por classe (média ± desvio entre folds)", "", "| métrica | média | desvio |", "|---|---|---|"]
     for c in cls_cols:
         L.append(f"| {c} | {summary['metrics'][c]['mean']:.3f} | {summary['metrics'][c]['std']:.3f} |")
-    L += ["", f"Mediana da melhor época: **{summary['median_best_epoch']}** (épocas do treino definitivo, E8).",
+    if over:
+        L += ["", "## Overfitting: treino × validação (best.pt de cada fold)", "",
+              "| fold | mAP50 treino | mAP50 validação | diferença | mAP50-95 treino | mAP50-95 validação | diferença |",
+              "|---|---|---|---|---|---|---|"]
+        for o in over:
+            L.append(f"| {o['fold']} | {o['train_mAP50']:.3f} | {o['val_mAP50']:.3f} | {o['gap_mAP50']:+.3f} | "
+                     f"{o['train_mAP50_95']:.3f} | {o['val_mAP50_95']:.3f} | {o['gap_mAP50_95']:+.3f} |")
+        g = np.mean([o["gap_mAP50"] for o in over])
+        L += ["", f"Diferença média de mAP50: **{g:+.3f}**. Quanto maior, mais o modelo decorou o treino "
+              "(vai bem no que já viu e pior no que não viu)."]
+    L += ["", f"Mediana da melhor época: **{summary['median_best_epoch']}** (referência de quantas épocas a configuração precisa).",
           f"Limiar de confiança que maximiza o F1 (mediana): **{summary['best_conf_median']}** "
           "(use no teste com `final_test.py --conf cv`).", "",
           "Observação: o fold 0 foi usado em todas as decisões (modelo, tamanho, resolução, CLAHE, aumento "
